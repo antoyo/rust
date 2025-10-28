@@ -117,6 +117,7 @@ impl<'gcc, 'tcx> CodegenCx<'gcc, 'tcx> {
             on_stack_param_indices,
             #[cfg(feature = "master")]
             fn_attributes,
+            has_indirect_param,
         } = fn_abi.gcc_type(self);
         #[cfg(feature = "master")]
         let conv = fn_abi.gcc_cconv(self);
@@ -124,6 +125,27 @@ impl<'gcc, 'tcx> CodegenCx<'gcc, 'tcx> {
         let conv = None;
         let func = declare_raw_fn(self, name, conv, return_type, &arguments_type, is_c_variadic);
         self.on_stack_function_params.borrow_mut().insert(func, on_stack_param_indices);
+
+        if name == "_ZN4core10intrinsics9cold_path17ha9169cdbb30c5ff5E" {
+            //dbg!(has_indirect_param);
+            //panic!();
+        }
+        if name == "_ZN4core10intrinsics16carrying_mul_add17h128dbbfd5cd0c894E" {
+            //dbg!(has_indirect_param);
+            //panic!();
+        }
+        if has_indirect_param {
+            let lvalue =
+                if self.linkage.get() != FunctionType::Extern {
+                    let return_type = func.get_return_type();
+                    Some(func.new_local(None, return_type, "indirectParam"))
+                }
+                else {
+                    None
+                };
+
+            self.functions_with_indirect_param.borrow_mut().insert(func, lvalue);
+        }
         #[cfg(feature = "master")]
         for fn_attr in fn_attributes {
             func.add_attribute(fn_attr);

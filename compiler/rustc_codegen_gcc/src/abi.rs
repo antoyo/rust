@@ -20,8 +20,25 @@ use crate::context::CodegenCx;
 use crate::type_of::LayoutGccExt;
 
 impl AbiBuilderMethods for Builder<'_, '_, '_> {
-    fn get_param(&mut self, index: usize) -> Self::Value {
+    fn get_param(&mut self, mut index: usize) -> Self::Value {
         let func = self.current_func();
+        if self.functions_with_indirect_param.borrow().contains_key(&func) {
+            if index == 0 {
+                /*let return_type = func.get_return_type();
+                let var = func.new_local(self.location, return_type, "indirectParam");
+                *self.indirect_param_lvalue.borrow_mut() = Some(var);
+                return var.get_address(None);*/
+                if let Some(lvalue) = self.functions_with_indirect_param.borrow()[&func] {
+                    return lvalue.get_address(None);
+                }
+            }
+
+            //println!("Substracting one for: {:?} -> {}", func, index);
+            // Remove once since the indirect parameter is not a parameter in GCC: it is the return
+            // type.
+            index -= 1;
+        }
+        assert!(index < func.get_param_count(), "{:?}[{}]", func, index);
         let param = func.get_param(index as i32);
         let on_stack = if let Some(on_stack_param_indices) =
             self.on_stack_function_params.borrow().get(&func)
@@ -104,6 +121,7 @@ pub struct FnAbiGcc<'gcc> {
     pub on_stack_param_indices: FxHashSet<usize>,
     #[cfg(feature = "master")]
     pub fn_attributes: Vec<FnAttribute<'gcc>>,
+    pub has_indirect_param: bool,
 }
 
 pub trait FnAbiGccExt<'gcc, 'tcx> {
@@ -117,6 +135,7 @@ pub trait FnAbiGccExt<'gcc, 'tcx> {
 impl<'gcc, 'tcx> FnAbiGccExt<'gcc, 'tcx> for FnAbi<'tcx, Ty<'tcx>> {
     fn gcc_type(&self, cx: &CodegenCx<'gcc, 'tcx>) -> FnAbiGcc<'gcc> {
         let mut on_stack_param_indices = FxHashSet::default();
+        let mut has_indirect_param = false;
 
         // This capacity calculation is approximate.
         let mut argument_tys = Vec::with_capacity(
@@ -128,8 +147,10 @@ impl<'gcc, 'tcx> FnAbiGccExt<'gcc, 'tcx> for FnAbi<'tcx, Ty<'tcx>> {
             PassMode::Direct(_) | PassMode::Pair(..) => self.ret.layout.immediate_gcc_type(cx),
             PassMode::Cast { ref cast, .. } => cast.gcc_type(cx),
             PassMode::Indirect { .. } => {
-                argument_tys.push(cx.type_ptr_to(self.ret.layout.gcc_type(cx)));
-                cx.type_void()
+                has_indirect_param = true;
+                let typ = self.ret.layout.gcc_type(cx);
+                typ.set_addressable();
+                typ
             }
         };
         #[cfg(feature = "master")]
@@ -219,6 +240,7 @@ impl<'gcc, 'tcx> FnAbiGccExt<'gcc, 'tcx> for FnAbi<'tcx, Ty<'tcx>> {
             on_stack_param_indices,
             #[cfg(feature = "master")]
             fn_attributes: fn_attrs,
+            has_indirect_param,
         }
     }
 

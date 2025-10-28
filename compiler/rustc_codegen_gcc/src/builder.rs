@@ -538,6 +538,12 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
     }
 
     fn ret_void(&mut self) {
+        if let Some(Some(var)) = self.functions_with_indirect_param.borrow().get(&self.current_func()) {
+            // Return the indirect parameter if we're in a function with an indirect parameter.
+            self.llbb().end_with_return(self.location, var.to_rvalue());
+            return;
+        }
+
         self.llbb().end_with_void_return(self.location)
     }
 
@@ -666,7 +672,7 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         let return_type = self.block.get_function().get_return_type();
         let void_type = self.context.new_type::<()>();
         if return_type == void_type {
-            self.block.end_with_void_return(self.location)
+            self.ret_void();
         } else {
             let return_value =
                 self.current_func().new_local(self.location, return_type, "unreachableReturn");
@@ -1781,16 +1787,6 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         funclet: Option<&Funclet>,
         _instance: Option<Instance<'tcx>>,
     ) -> RValue<'gcc> {
-        // FIXME: change this in the `rustc_codegen_gcc` repo after the sync, to use the `libgccjit` indirect return suppport.
-        let args = match indirect_return_pointer {
-            None => args.to_vec(),
-            Some(sret_ptr) => {
-                let mut args = args.to_vec();
-                // Prepend the indirect return pointer
-                args.insert(0, sret_ptr);
-                args
-            }
-        };
         // FIXME(antoyo): remove when having a proper API.
         let gcc_func = unsafe { std::mem::transmute::<RValue<'gcc>, Function<'gcc>>(func) };
         let call = if self.functions.borrow().values().any(|value| *value == gcc_func) {
@@ -1804,7 +1800,17 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         if let Some(_fn_abi) = fn_abi {
             // FIXME(bjorn3): Apply function attributes
         }
-        call
+
+        match indirect_return_pointer {
+            None => call,
+            Some(sret_ptr) => {
+                // Assign the result of the call to the indirect return pointer.
+                let ptr = self.check_store(call, sret_ptr);
+                let lvalue = ptr.dereference(self.location);
+                self.llbb().add_assignment(self.location, lvalue, call);
+                self.context.new_rvalue_zero(self.cx.type_u32())
+            }
+        }
     }
 
     fn tail_call(
