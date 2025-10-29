@@ -149,6 +149,7 @@ impl<'gcc, 'tcx> FnAbiGccExt<'gcc, 'tcx> for FnAbi<'tcx, Ty<'tcx>> {
             PassMode::Indirect { .. } => {
                 has_indirect_param = true;
                 let typ = self.ret.layout.gcc_type(cx);
+
                 typ.set_addressable();
                 typ
             }
