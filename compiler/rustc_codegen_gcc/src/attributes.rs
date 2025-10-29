@@ -126,13 +126,20 @@ pub fn from_fn_attrs<'gcc, 'tcx>(
         .chain(codegen_fn_attrs.instruction_set.iter().map(|x| match *x {
             InstructionSetAttr::ArmA32 => "-thumb-mode", // TODO(antoyo): support removing feature.
             InstructionSetAttr::ArmT32 => "thumb-mode",
-        }))
-        .collect::<Vec<_>>();
+        }));
+        //.collect::<Vec<_>>();
 
+    let arch = cx.sess().target.arch.as_ref();
     // TODO(antoyo): cg_llvm adds global features to each function so that LTO keep them.
     // Check if GCC requires the same.
-    let mut global_features = cx.tcx.global_backend_features(()).iter().map(|s| s.as_str());
-    function_features.extend(&mut global_features);
+    let mut global_features: Vec<_> = cx.tcx.global_backend_features(())
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+    //dbg!(&function_features);
+    global_features.extend(&mut function_features);
+    let function_features = global_features;
+    //dbg!(&function_features);
     let target_features = function_features
         .iter()
         .filter_map(|feature| {
@@ -143,9 +150,14 @@ pub fn from_fn_attrs<'gcc, 'tcx>(
 
             if feature.starts_with('-') {
                 Some(format!("no{}", feature))
-            } else if let Some(stripped) = feature.strip_prefix('+') {
+            } else if arch != "aarch64" && let Some(stripped) = feature.strip_prefix('+') {
                 Some(stripped.to_string())
             } else {
+                if arch == "aarch64" && *feature == "neon" {
+                    return None;
+                }
+
+                let feature = adjust_feature(arch, feature);
                 Some(feature.to_string())
             }
         })
@@ -153,12 +165,33 @@ pub fn from_fn_attrs<'gcc, 'tcx>(
         .join(",");
     if !target_features.is_empty() {
         #[cfg(feature = "master")]
-        match cx.sess().target.arch.as_ref() {
-            "x86" | "x86_64" | "powerpc" => {
-                func.add_attribute(FnAttribute::Target(&target_features))
-            }
+        /*match cx.sess().target.arch.as_ref() {
+            "x86" | "x86_64" | "powerpc" => {*/
+                func.add_attribute(FnAttribute::Target(&target_features));
+                //func.add_attribute(FnAttribute::Target(&format!("{},+crc", target_features)));
+                //println!("Adding feature to {:?}: {}", func, target_features);
+                //func.add_attribute(FnAttribute::Target("+crc"));
+            /*}
             // The target attribute is not supported on other targets in GCC.
             _ => (),
+        }*/
+    }
+}
+
+fn adjust_feature<'a>(arch: &str, feature: &'a str) -> &'a str {
+    //println!("Arch: {arch}, feature: {feature}");
+    match arch {
+        "aarch64" => {
+            match feature {
+                "+v8a" => "arch=armv8-a",
+                // TODO: support other arm versions.
+                "+outline-atomics" => feature.strip_prefix('+').expect("+ at the start of feature"),
+                // TODO: can we generalize this to remove the + prefix if there's one and add a +
+                // if there's none?
+                "crc" => "+crc",
+                _ => return feature,
+            }
         }
+        _ => panic!("{arch}"),
     }
 }
