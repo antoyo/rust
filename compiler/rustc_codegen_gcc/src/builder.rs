@@ -317,6 +317,7 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
     fn function_call(
         &mut self,
         func: RValue<'gcc>,
+        indirect_return_pointer: Option<RValue<'gcc>>,
         args: &[RValue<'gcc>],
         _funclet: Option<&Funclet>,
     ) -> RValue<'gcc> {
@@ -330,6 +331,14 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         let void_type = self.context.new_type::<()>();
         let current_func = self.block.get_function();
         if return_type != void_type {
+            /*let return_type =
+                if format!("{:?}", return_type).contains("adressable") {
+                    return_type.unqualified()
+                }
+                else {
+                    return_type
+                };
+            assert!(!format!("{:?}", return_type).contains("adressable"));
             let result = current_func.new_local(
                 self.location,
                 return_type,
@@ -340,7 +349,9 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
                 result,
                 self.cx.context.new_call(self.location, func, &args),
             );
-            result.to_rvalue()
+            result.to_rvalue()*/
+            let return_value = self.cx.context.new_call(self.location, func, &args);
+            self.assign_call_to_var(indirect_return_pointer, return_value)
         } else {
             self.block
                 .add_eval(self.location, self.cx.context.new_call(self.location, func, &args));
@@ -353,6 +364,7 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         &mut self,
         typ: Type<'gcc>,
         mut func_ptr: RValue<'gcc>,
+        indirect_return_pointer: Option<RValue<'gcc>>,
         args: &[RValue<'gcc>],
         _funclet: Option<&Funclet>,
     ) -> RValue<'gcc> {
@@ -391,13 +403,28 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
                 args_adjusted,
                 orig_args,
             );
+            let return_type = return_value.get_type();
+            let return_type =
+                if format!("{:?}", return_type).contains("adressable") {
+                    return_type.unqualified()
+                }
+                else {
+                    return_type
+                };
+
+            self.assign_call_to_var(indirect_return_pointer, return_value)
+
+            /*assert!(!format!("{:?}", return_type).contains("adressable"));
             let result = current_func.new_local(
                 self.location,
-                return_value.get_type(),
+                return_type,
                 format!("ptrReturnValue{}", self.next_value_counter()),
             );
+            //println!("Return type: {:?}", return_type);
+            // FIXME: it appears here that this assignment requires a CONVERT_EXPR which GCC
+            // doesn't like when the type is ADDRESSABLE.
             self.block.add_assignment(self.location, result, return_value);
-            result.to_rvalue()
+            result.to_rvalue()*/
         } else {
             #[cfg(not(feature = "master"))]
             if gcc_func.get_param_count() == 0 {
@@ -1763,25 +1790,15 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         // FIXME(antoyo): remove when having a proper API.
         let gcc_func = unsafe { std::mem::transmute::<RValue<'gcc>, Function<'gcc>>(func) };
         let call = if self.functions.borrow().values().any(|value| *value == gcc_func) {
-            self.function_call(func, &args, funclet)
+            self.function_call(func, indirect_return_pointer, &args, funclet)
         } else {
             // If it's a not function that was defined, it's a function pointer.
-            self.function_ptr_call(typ, func, &args, funclet)
+            self.function_ptr_call(typ, func, indirect_return_pointer, &args, funclet)
         };
         if let Some(_fn_abi) = fn_abi {
             // TODO(bjorn3): Apply function attributes
         }
-
-        match indirect_return_pointer {
-            None => call,
-            Some(sret_ptr) => {
-                // Assign the result of the call to the indirect return pointer.
-                let ptr = self.check_store(call, sret_ptr);
-                let lvalue = ptr.dereference(self.location);
-                self.llbb().add_assignment(self.location, lvalue, call);
-                self.context.new_rvalue_zero(self.cx.type_u32())
-            }
-        }
+        call
     }
 
     fn tail_call(
@@ -2429,6 +2446,51 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
 
         let res = then_vals | else_vals;
         self.bitcast_if_needed(res, result_type)
+    }
+
+    fn assign_call_to_var(&self, indirect_return_pointer: Option<RValue<'gcc>>, call: RValue<'gcc>) -> RValue<'gcc> {
+        match indirect_return_pointer {
+            None => {
+                let return_type = call.get_type();
+                assert!(!format!("{:?}", return_type).contains("adressable"));
+                let result = self.current_func().new_local(
+                    self.location,
+                    return_type,
+                    format!("ptrReturnValue{}", self.next_value_counter()),
+                );
+                //println!("Return type: {:?}", return_type);
+                // FIXME: it appears here that this assignment requires a CONVERT_EXPR which GCC
+                // doesn't like when the type is ADDRESSABLE.
+                self.block.add_assignment(self.location, result, call);
+                result.to_rvalue()
+            },
+            Some(sret_ptr) => {
+                // Assign the result of the call to the indirect return pointer.
+                //let ptr = self.check_store(call, sret_ptr);
+                // FIXME: this dereference (when using ptr instead of sret_ptr) gives a value of
+                // type ADDRESSABLE. The problem is because we cast to the result type of the call
+                // which is ADDRESSABLE.
+                // sret_ptr is also of type ADDRESSABLE.
+                //println!("sret ptr: {:?}", sret_ptr);
+                // FIXME: seems like I cannot use a call with addressable return type in a
+                // VIEW_CONVERT_EXPR.
+
+                // NOTE: we need to do 2 assignments because the addressable struct needs to be
+                // assigned to a variable of the exact same type. Otherwise, libgccjit will
+                // construct a CONVERT_EXPR, which will make the gimplifier create a temporary.
+                // And GCC cannot create temporaries with an addressable type.
+                let lvalue = sret_ptr.dereference(None);
+                let call_var = self.current_func().new_local(None, call.get_type(), "indirectCall");
+                // HERE
+                self.llbb().add_assignment(None, call_var, call);
+                let casted_call = self.context.new_bitcast(None, call_var.to_rvalue(), lvalue.to_rvalue().get_type());
+
+                assert!(!format!("{:?}", lvalue.to_rvalue().get_type()).contains("adressable"));
+
+                self.llbb().add_assignment(None, lvalue, casted_call);
+                self.context.new_rvalue_zero(self.cx.type_u32())
+            }
+        }
     }
 }
 

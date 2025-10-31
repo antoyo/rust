@@ -140,10 +140,27 @@ impl<'gcc, 'tcx> CodegenCx<'gcc, 'tcx> {
             //panic!();
         }
         if has_indirect_param {
+            // Tried: using DECL_BY_REFERENCE instead of TREE_ADDRESSABLE.
+            // Tried: both for PARM_DECL (DOESN'T WORK) and RESULT_DECL (WORKS).
+            // TODO: try again with PARM_DECL since we needed a pointer?
+            // This will require using pointers directly in cg_gcc.
+            //func.set_indirect_return();
+
             let lvalue =
                 if self.linkage.get() != FunctionType::Extern {
-                    let return_type = func.get_return_type();
-                    Some(func.new_local(None, return_type, "indirectParam"))
+                    // NOTE: it is important to call unqualified since we would not want the type
+                    // of the variable to be addressable.
+                    // If the type of this variable would be addressable, we would get an assert
+                    // failure later down the line because of a temporary with an addressable type
+                    // which GCC doesn't like.
+                    //println!("Function return type: {:?}", func.get_return_type());
+                    let var_type = func.get_return_type().unqualified();
+                    //let var_type = func.get_return_type();
+
+                    assert!(!format!("{:?}", var_type).contains("adressable"));
+                    //println!("Variable type: {:?}", var_type);
+                    // FIXME: var_type has ADDRESSABLE here.
+                    Some(func.new_local(None, var_type, "indirectParam"))
                 }
                 else {
                     None
