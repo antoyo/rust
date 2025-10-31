@@ -149,7 +149,14 @@ impl<'gcc, 'tcx> FnAbiGccExt<'gcc, 'tcx> for FnAbi<'tcx, Ty<'tcx>> {
             PassMode::Indirect { .. } => {
                 has_indirect_param = true;
                 let typ = self.ret.layout.gcc_type(cx);
-
+                /*println!("Type: {:?}", typ);
+                if let Some(struct_type) = typ.is_struct() {
+                    for i in 0..struct_type.get_field_count() {
+                        println!("  * {:?}", struct_type.get_field(i as i32));
+                    }
+                }*/
+                //println!("Calling get addressable");
+                // typ.get_addressable()
                 typ.set_addressable();
                 typ
             }
