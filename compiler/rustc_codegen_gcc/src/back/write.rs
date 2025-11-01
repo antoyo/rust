@@ -161,6 +161,7 @@ pub(crate) fn codegen(
                     println!("Dumped reproducer {}", module.name);
                 }
                 if env::var("CG_GCCJIT_DUMP_TO_FILE").as_deref() == Ok("1") {
+                    println!("Duming to file");
                     let _ = fs::create_dir("/tmp/gccjit_dumps");
                     let path = &format!("/tmp/gccjit_dumps/{}.c", module.name);
                     context.set_debug_info(true);

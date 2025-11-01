@@ -156,8 +156,8 @@ impl<'gcc, 'tcx> CodegenCx<'gcc, 'tcx> {
                     //println!("Function return type: {:?}", func.get_return_type());
                     let var_type = func.get_return_type().unqualified();
                     //let var_type = func.get_return_type();
+                    assert!(!format!("{:?}", var_type).contains("addressable"));
 
-                    assert!(!format!("{:?}", var_type).contains("adressable"));
                     //println!("Variable type: {:?}", var_type);
                     // FIXME: var_type has ADDRESSABLE here.
                     Some(func.new_local(None, var_type, "indirectParam"))
