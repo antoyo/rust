@@ -328,13 +328,13 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         let current_func = self.block.get_function();
         if return_type != void_type {
             /*let return_type =
-                if format!("{:?}", return_type).contains("adressable") {
+                if format!("{:?}", return_type).contains("addressable") {
                     return_type.unqualified()
                 }
                 else {
                     return_type
                 };
-            assert!(!format!("{:?}", return_type).contains("adressable"));
+            assert!(!format!("{:?}", return_type).contains("addressable"));
             let result = current_func.new_local(
                 self.location,
                 return_type,
@@ -406,7 +406,7 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
             );
             let return_type = return_value.get_type();
             let return_type =
-                if format!("{:?}", return_type).contains("adressable") {
+                if format!("{:?}", return_type).contains("addressable") {
                     return_type.unqualified()
                 }
                 else {
@@ -415,7 +415,7 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
 
             self.assign_call_to_var(indirect_return_pointer, return_value)
 
-            /*assert!(!format!("{:?}", return_type).contains("adressable"));
+            /*assert!(!format!("{:?}", return_type).contains("addressable"));
             let result = current_func.new_local(
                 self.location,
                 return_type,
@@ -2439,7 +2439,7 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         match indirect_return_pointer {
             None => {
                 let return_type = call.get_type();
-                assert!(!format!("{:?}", return_type).contains("adressable"));
+                assert!(!format!("{:?}", return_type).contains("addressable"));
                 let result = self.current_func().new_local(
                     self.location,
                     return_type,
@@ -2462,6 +2462,14 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
                 // FIXME: seems like I cannot use a call with addressable return type in a
                 // VIEW_CONVERT_EXPR.
 
+                // TODO TODO: so after build_distinct_type_copy you might need to copy the
+                // fields too for a record.
+                // and update them to have the DECL_CONTEXT point to the new type.
+                // or rather DECL_FIELD_CONTEXT.
+                // or maybe the better way is to create a new RECORD that has only one field
+                // of the other type.
+                // and set TYPE_ADDRESSABLE on the outer RECORD type.
+
                 // NOTE: we need to do 2 assignments because the addressable struct needs to be
                 // assigned to a variable of the exact same type. Otherwise, libgccjit will
                 // construct a CONVERT_EXPR, which will make the gimplifier create a temporary.
@@ -2472,7 +2480,7 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
                 self.llbb().add_assignment(None, call_var, call);
                 let casted_call = self.context.new_bitcast(None, call_var.to_rvalue(), lvalue.to_rvalue().get_type());
 
-                assert!(!format!("{:?}", lvalue.to_rvalue().get_type()).contains("adressable"));
+                assert!(!format!("{:?}", lvalue.to_rvalue().get_type()).contains("addressable"));
 
                 self.llbb().add_assignment(None, lvalue, casted_call);
                 self.context.new_rvalue_zero(self.cx.type_u32())
