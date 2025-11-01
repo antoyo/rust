@@ -40,6 +40,7 @@ pub use toml::change_id::ChangeId;
 pub use toml::rust::BootstrapOverrideLld;
 pub use toml::target::Target;
 
+use crate::HashMap;
 use crate::Display;
 use crate::str::FromStr;
 
@@ -433,6 +434,8 @@ pub enum GccCiMode {
     /// If it is not available on CI, it will be built locally instead.
     #[default]
     DownloadFromCi,
+    UsePrebuilt(PathBuf),
+    UsePrebuiltPerTarget(HashMap<String, PathBuf>),
 }
 
 pub fn threads_from_config(v: u32) -> u32 {

@@ -26,6 +26,7 @@ use crate::core::builder;
 use crate::core::builder::{
     Builder, Cargo, Kind, RunConfig, ShouldRun, Step, StepMetadata, crate_description,
 };
+use crate::core::config::GccCiMode;
 use crate::core::config::toml::target::DefaultLinuxLinkerOverride;
 use crate::core::config::{
     CompilerBuiltins, DebuginfoLevel, LlvmLibunwind, RustcLto, TargetSelection,
@@ -278,6 +279,27 @@ impl Step for Std {
         for rustflag in self.extra_rust_args.iter() {
             cargo.rustflag(rustflag);
         }
+
+        // TODO: move this somewhere else. Perhaps in std_cargo or builder::Cargo::new?
+        if *builder.config.default_codegen_backend(target) == CodegenBackendKind::Gcc {
+            if let GccCiMode::UsePrebuilt(ref path) = builder.config.gcc_ci_mode {
+                println!("Using {:?}/libgccjit.so", path);
+                //cargo.env("LD_LIBRARY_PATH", path);
+                // FIXME: LD_PRELOAD is probably not correct. We should find a way to set LD_LIBRARY_PATH.
+                cargo.env("LD_PRELOAD", path.join("libgccjit.so"));
+            }
+
+            if let GccCiMode::UsePrebuiltPerTarget(ref paths) = builder.config.gcc_ci_mode
+                && let Some(path) = paths.get(&target.triple.to_string())
+            {
+                println!("Using {:?}/libgccjit.so", path);
+                //cargo.env("LD_LIBRARY_PATH", path);
+                // FIXME: LD_PRELOAD is probably not correct. We should find a way to set LD_LIBRARY_PATH.
+                cargo.env("LD_PRELOAD", path.join("libgccjit.so"));
+            }
+        }
+
+        println!("Compiling here for {} with:", target);
 
         let _guard = builder.msg(
             Kind::Build,

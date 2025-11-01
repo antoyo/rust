@@ -614,7 +614,7 @@ impl Config {
             vendor: dist_vendor,
         } = toml.dist.unwrap_or_default();
 
-        let Gcc { download_ci_gcc: gcc_download_ci_gcc } = toml.gcc.unwrap_or_default();
+        let Gcc { download_ci_gcc: gcc_download_ci_gcc, libgccjit_dir } = toml.gcc.unwrap_or_default();
 
         if rust_bootstrap_override_lld.is_some() && rust_bootstrap_override_lld_legacy.is_some() {
             panic!(
@@ -836,6 +836,7 @@ impl Config {
         // Linux targets for which the user explicitly overrode the used linker
         let mut targets_with_user_linker_override = HashSet::new();
 
+        let mut libgccjit_dir_per_target = HashMap::new();
         if let Some(t) = toml.target {
             for (triple, cfg) in t {
                 let TomlTarget {
@@ -864,7 +865,11 @@ impl Config {
                     runner: target_runner,
                     optimized_compiler_builtins: target_optimized_compiler_builtins,
                     jemalloc: target_jemalloc,
+                    libgccjit_dir: target_libgccjit_dir,
                 } = cfg;
+                if let Some(libgccjit_dir) = target_libgccjit_dir {
+                    libgccjit_dir_per_target.insert(triple.clone(), PathBuf::from(libgccjit_dir));
+                }
 
                 let mut target = Target::from_triple(&triple);
 
@@ -1204,12 +1209,15 @@ impl Config {
             Warnings::Default => rust_deny_warnings.unwrap_or(true),
         };
 
-        let gcc_ci_mode = match gcc_download_ci_gcc {
-            Some(value) => match value {
+        println!("Choosing here");
+        let gcc_ci_mode = match (libgccjit_dir, libgccjit_dir_per_target, gcc_download_ci_gcc) {
+            (Some(path), _, _) => GccCiMode::UsePrebuilt(PathBuf::from(path)),
+            (None, paths, _) if !paths.is_empty() => GccCiMode::UsePrebuiltPerTarget(paths),
+            (None, _, Some(value)) => match value {
                 true => GccCiMode::DownloadFromCi,
                 false => GccCiMode::BuildLocally,
             },
-            None => GccCiMode::default(),
+            (None, _, None) => GccCiMode::default(),
         };
 
         let targets = flags_target
@@ -1218,6 +1226,8 @@ impl Config {
                 build_target.map(|t| t.iter().map(|t| TargetSelection::from_user(t)).collect())
             })
             .unwrap_or_else(|| hosts.clone());
+
+        println!("Targets: {:?}", targets);
 
         #[allow(clippy::map_identity)]
         let skip = flags_skip

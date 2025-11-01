@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 
 use crate::FileType;
 use crate::core::builder::{Builder, Cargo, Kind, RunConfig, ShouldRun, Step};
-use crate::core::config::TargetSelection;
+use crate::core::config::{GccCiMode, TargetSelection};
 use crate::utils::build_stamp::{BuildStamp, generate_smart_stamp_hash};
 use crate::utils::exec::command;
 use crate::utils::helpers::{self, t};
@@ -117,7 +117,7 @@ fn try_download_gcc(builder: &Builder<'_>, target: TargetSelection) -> Option<Pa
     use build_helper::git::PathFreshness;
 
     // Try to download GCC from CI if configured and available
-    if !matches!(builder.config.gcc_ci_mode, crate::core::config::GccCiMode::DownloadFromCi) {
+    if !matches!(builder.config.gcc_ci_mode, GccCiMode::DownloadFromCi) {
         return None;
     }
     if target != "x86_64-unknown-linux-gnu" {
@@ -170,6 +170,19 @@ fn try_download_gcc(_builder: &Builder<'_>, _target: TargetSelection) -> Option<
 /// It's used to avoid busting caches during x.py check -- if we've already built
 /// GCC, it's fine for us to not try to avoid doing so.
 pub fn get_gcc_build_status(builder: &Builder<'_>, target: TargetSelection) -> GccBuildStatus {
+    println!("Target: {:?}", target.triple);
+    if let GccCiMode::UsePrebuilt(ref path) = builder.config.gcc_ci_mode {
+        println!("Using {:?}/libgccjit.so", path);
+        return GccBuildStatus::AlreadyBuilt(path.join("libgccjit.so"));
+    }
+
+    if let GccCiMode::UsePrebuiltPerTarget(ref paths) = builder.config.gcc_ci_mode
+        && let Some(path) = paths.get(&target.triple.to_string())
+    {
+        println!("Using {:?}/libgccjit.so", path);
+        return GccBuildStatus::AlreadyBuilt(path.join("libgccjit.so"));
+    }
+
     if let Some(path) = try_download_gcc(builder, target) {
         return GccBuildStatus::AlreadyBuilt(path);
     }

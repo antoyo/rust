@@ -35,7 +35,7 @@ use utils::exec::ExecutionContext;
 
 use crate::core::builder;
 use crate::core::builder::Kind;
-use crate::core::config::{BootstrapOverrideLld, DryRun, LlvmLibunwind, TargetSelection, flags};
+use crate::core::config::{BootstrapOverrideLld, DryRun, GccCiMode, LlvmLibunwind, TargetSelection, flags};
 use crate::utils::exec::{BootstrapCommand, command};
 use crate::utils::helpers::{self, dir_is_empty, exe, libdir, set_file_times, split_debuginfo};
 
@@ -220,6 +220,7 @@ pub struct Build {
     enzyme_info: GitInfo,
     in_tree_llvm_info: GitInfo,
     in_tree_gcc_info: GitInfo,
+    gcc_ci_mode: GccCiMode,
     local_rebuild: bool,
     fail_fast: bool,
     doc_tests: DocTests,
@@ -478,6 +479,7 @@ impl Build {
         let enzyme_info = config.enzyme_info.clone();
         let in_tree_llvm_info = config.in_tree_llvm_info.clone();
         let in_tree_gcc_info = config.in_tree_gcc_info.clone();
+        let gcc_ci_mode = config.gcc_ci_mode.clone();
 
         let initial_target_libdir = command(&config.initial_rustc)
             .run_in_dry_run()
@@ -570,6 +572,7 @@ impl Build {
             enzyme_info,
             in_tree_llvm_info,
             in_tree_gcc_info,
+            gcc_ci_mode,
             cc: HashMap::new(),
             cxx: HashMap::new(),
             ar: HashMap::new(),
