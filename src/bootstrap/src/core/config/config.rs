@@ -1209,7 +1209,6 @@ impl Config {
             Warnings::Default => rust_deny_warnings.unwrap_or(true),
         };
 
-        println!("Choosing here");
         let gcc_ci_mode = match (libgccjit_dir, libgccjit_dir_per_target, gcc_download_ci_gcc) {
             (Some(path), _, _) => GccCiMode::UsePrebuilt(PathBuf::from(path)),
             (None, paths, _) if !paths.is_empty() => GccCiMode::UsePrebuiltPerTarget(paths),

@@ -281,6 +281,8 @@ impl Step for Std {
         }
 
         // TODO: move this somewhere else. Perhaps in std_cargo or builder::Cargo::new?
+        // FIXME: seems like target here always point to m68k-unknown-linux-gnu.
+        // ==> This is not true.
         if *builder.config.default_codegen_backend(target) == CodegenBackendKind::Gcc {
             if let GccCiMode::UsePrebuilt(ref path) = builder.config.gcc_ci_mode {
                 println!("Using {:?}/libgccjit.so", path);
@@ -299,7 +301,8 @@ impl Step for Std {
             }
         }
 
-        println!("Compiling here for {} with:", target);
+        let target_and_stage: crate::TargetAndStage = build_compiler.into();
+        println!("HERE Compiling here for {:?} -> {}", target_and_stage.target, target);
 
         let _guard = builder.msg(
             Kind::Build,
@@ -308,6 +311,12 @@ impl Step for Std {
             build_compiler,
             target,
         );
+
+        if target == "m68k-unknown-linux-gnu" {
+            println!("HERE");
+            /*let backtrace = std::backtrace::Backtrace::capture();
+            println!("HERE {}", backtrace);*/
+        }
 
         let stamp = build_stamp::libstd_stamp(builder, build_compiler, target);
         run_cargo(
@@ -1173,6 +1182,8 @@ impl Step for Rustc {
             // Relocations are required for BOLT to work.
             cargo.env("RUSTC_BOLT_LINK_FLAGS", "1");
         }
+
+        println!("*** Rustc target: {}", self.target);
 
         let _guard = builder.msg(
             Kind::Build,
@@ -2236,6 +2247,14 @@ impl Step for Assemble {
             "target_compiler.host" = ?target_compiler.host,
             "building compiler libraries to link to"
         );
+
+        /*println!("*************** Trying to add compiler for {:?}", builder.build.targets);
+        for target in &builder.build.targets {
+            if *builder.config.default_codegen_backend(*target) == CodegenBackendKind::Gcc && *target != builder.host_target {
+                println!("*************** Adding compiler for {:?}", target);
+                builder.compiler(builder.top_stage, *target);
+            }
+        }*/
 
         // It is possible that an uplift has happened, so we override build_compiler here.
         let BuiltRustc { build_compiler } =
