@@ -284,20 +284,22 @@ impl Step for Std {
         // FIXME: seems like target here always point to m68k-unknown-linux-gnu.
         // ==> This is not true.
         if *builder.config.default_codegen_backend(target) == CodegenBackendKind::Gcc {
-            if let GccCiMode::UsePrebuilt(ref path) = builder.config.gcc_ci_mode {
-                println!("Using {:?}/libgccjit.so", path);
-                //cargo.env("LD_LIBRARY_PATH", path);
-                // FIXME: LD_PRELOAD is probably not correct. We should find a way to set LD_LIBRARY_PATH.
-                cargo.env("LD_PRELOAD", path.join("libgccjit.so"));
-            }
-
-            if let GccCiMode::UsePrebuiltPerTarget(ref paths) = builder.config.gcc_ci_mode
-                && let Some(path) = paths.get(&target.triple.to_string())
-            {
-                println!("Using {:?}/libgccjit.so", path);
-                //cargo.env("LD_LIBRARY_PATH", path);
-                // FIXME: LD_PRELOAD is probably not correct. We should find a way to set LD_LIBRARY_PATH.
-                cargo.env("LD_PRELOAD", path.join("libgccjit.so"));
+            match builder.config.gcc_ci_mode {
+                GccCiMode::UsePrebuilt(ref path) => {
+                    println!("Using {:?}/libgccjit.so", path);
+                    //cargo.env("LD_LIBRARY_PATH", path);
+                    // FIXME: LD_PRELOAD is probably not correct. We should find a way to set LD_LIBRARY_PATH.
+                    cargo.env("LD_PRELOAD", path.join("libgccjit.so"));
+                },
+                GccCiMode::UsePrebuiltPerTarget(ref paths) => {
+                    if let Some(path) = paths.get(&target.triple.to_string()) {
+                        println!("Using {:?}/libgccjit.so", path);
+                        //cargo.env("LD_LIBRARY_PATH", path);
+                        // FIXME: LD_PRELOAD is probably not correct. We should find a way to set LD_LIBRARY_PATH.
+                        cargo.env("LD_PRELOAD", path.join("libgccjit.so"));
+                    }
+                },
+                _ => (),
             }
         }
 
@@ -1183,7 +1185,27 @@ impl Step for Rustc {
             cargo.env("RUSTC_BOLT_LINK_FLAGS", "1");
         }
 
+        // TODO: move this somewhere else. Perhaps in builder::Cargo::new?
         println!("*** Rustc target: {}", self.target);
+        if *builder.config.default_codegen_backend(target) == CodegenBackendKind::Gcc {
+            match builder.config.gcc_ci_mode {
+                GccCiMode::UsePrebuilt(ref path) => {
+                    println!("Using {:?}/libgccjit.so", path);
+                    //cargo.env("LD_LIBRARY_PATH", path);
+                    // FIXME: LD_PRELOAD is probably not correct. We should find a way to set LD_LIBRARY_PATH.
+                    cargo.env("LD_PRELOAD", path.join("libgccjit.so"));
+                },
+                GccCiMode::UsePrebuiltPerTarget(ref paths) => {
+                    if let Some(path) = paths.get(&target.triple.to_string()) {
+                        println!("Using {:?}/libgccjit.so", path);
+                        //cargo.env("LD_LIBRARY_PATH", path);
+                        // FIXME: LD_PRELOAD is probably not correct. We should find a way to set LD_LIBRARY_PATH.
+                        cargo.env("LD_PRELOAD", path.join("libgccjit.so"));
+                    }
+                },
+                _ => (),
+            }
+        }
 
         let _guard = builder.msg(
             Kind::Build,
