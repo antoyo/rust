@@ -1239,6 +1239,7 @@ impl Builder<'_> {
         cargo.env("CFG_COMPILER_HOST_TRIPLE", target.triple);
         // The host this new compiler is being *built* on.
         cargo.env("CFG_COMPILER_BUILD_TRIPLE", compiler.host.triple);
+        // TODO: HERE?
 
         // Set this for all builds to make sure doc builds also get it.
         cargo.env("CFG_RELEASE_CHANNEL", &self.config.channel);

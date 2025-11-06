@@ -1186,7 +1186,7 @@ impl Step for Rustc {
         }
 
         // TODO: move this somewhere else. Perhaps in builder::Cargo::new?
-        println!("*** Rustc target: {}", self.target);
+        /*println!("*** Rustc target: {}", self.target);
         if *builder.config.default_codegen_backend(target) == CodegenBackendKind::Gcc {
             match builder.config.gcc_ci_mode {
                 GccCiMode::UsePrebuilt(ref path) => {
@@ -1205,7 +1205,7 @@ impl Step for Rustc {
                 },
                 _ => (),
             }
-        }
+        }*/
 
         let _guard = builder.msg(
             Kind::Build,

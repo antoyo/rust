@@ -16,6 +16,8 @@
 //! never get replaced.
 
 use std::env;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::Instant;
@@ -31,6 +33,17 @@ mod shared_helpers;
 #[path = "../utils/proc_macro_deps.rs"]
 mod proc_macro_deps;
 
+macro_rules! log {
+    ($format_str:expr $(, $args:expr)*) => {
+        let mut file = OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open("/tmp/rustc_log")
+            .expect("opening log file");
+        writeln!(file, $format_str $(, $args)*).expect("write to log");
+    };
+}
+
 fn main() {
     let orig_args = env::args_os().skip(1).collect::<Vec<_>>();
     let mut args = orig_args.clone();
@@ -41,6 +54,7 @@ fn main() {
     // Detect whether or not we're a build script depending on whether --target
     // is passed (a bit janky...)
     let target = parse_value_from_args(&orig_args, "--target");
+    log!("Target: {:?}", target);
     let version = args.iter().find(|w| &**w == "-vV");
 
     // Use a different compiler for build scripts, since there may not yet be a
@@ -49,6 +63,7 @@ fn main() {
     // used. Currently, these two states are differentiated based on whether
     // --target and -vV is/isn't passed.
     let is_build_script = target.is_none() && version.is_none();
+    log!("Is build script: {}", is_build_script);
     let (rustc, libdir) = if is_build_script {
         ("RUSTC_SNAPSHOT", "RUSTC_SNAPSHOT_LIBDIR")
     } else {
@@ -61,7 +76,49 @@ fn main() {
     let rustc_real = env::var_os(rustc).unwrap_or_else(|| panic!("{rustc:?} was not set"));
     let libdir = env::var_os(libdir).unwrap_or_else(|| panic!("{libdir:?} was not set"));
     let mut dylib_path = dylib_path();
+
+    log!("CFG_COMPILER_BUILD_TRIPLE: {:?}", env::var_os("CFG_COMPILER_BUILD_TRIPLE"));
+    //log!("CFG_COMPILER_HOST_TRIPLE: {:?}", env::var_os("CFG_COMPILER_HOST_TRIPLE"));
+    let default_codegen_backend = env::var("CFG_DEFAULT_CODEGEN_BACKEND");
+    log!("CFG_DEFAULT_CODEGEN_BACKEND: {:?}", default_codegen_backend);
+    /*for (var, value) in env::vars() {
+        log!("{}: {}", var, value);
+    }*/
+
     dylib_path.insert(0, PathBuf::from(&libdir));
+
+    if default_codegen_backend.as_deref() == Ok("gcc") {
+        let path =
+            match target {
+                Some("x86_64-unknown-linux-gnu") | None => "/home/bouanto/Ordinateur/Programmation/Projets/gcc-repo/gcc-build/build/gcc",
+                Some("m68k-unknown-linux-gnu") => "/home/bouanto/x-tools/m68k-unknown-linux-gnu/usr/lib",
+                _ => todo!(),
+            };
+
+        log!("Using {:?}/libgccjit.so", path);
+
+        dylib_path.insert(0, PathBuf::from(path));
+    }
+
+    /*if *builder.config.default_codegen_backend(target) == CodegenBackendKind::Gcc {
+        match builder.config.gcc_ci_mode {
+            GccCiMode::UsePrebuilt(ref path) => {
+                log!("Using {:?}/libgccjit.so", path);
+                //cargo.env("LD_LIBRARY_PATH", path);
+                // FIXME: LD_PRELOAD is probably not correct. We should find a way to set LD_LIBRARY_PATH.
+                cargo.env("LD_PRELOAD", path.join("libgccjit.so"));
+            },
+            GccCiMode::UsePrebuiltPerTarget(ref paths) => {
+                if let Some(path) = paths.get(&target.triple.to_string()) {
+                    log!("Using {:?}/libgccjit.so", path);
+                    //cargo.env("LD_LIBRARY_PATH", path);
+                    // FIXME: LD_PRELOAD is probably not correct. We should find a way to set LD_LIBRARY_PATH.
+                    cargo.env("LD_PRELOAD", path.join("libgccjit.so"));
+                }
+            },
+            _ => (),
+        }
+    }*/
 
     // if we're running clippy, trust cargo-clippy to set clippy-driver appropriately (and don't override it with rustc).
     // otherwise, substitute whatever cargo thinks rustc should be with RUSTC_REAL.
