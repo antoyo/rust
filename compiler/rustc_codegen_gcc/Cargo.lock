@@ -56,18 +56,14 @@ dependencies = [
 
 [[package]]
 name = "gccjit"
-version = "2.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a0e310ef75f396cd11b2443b353d55376656ca92c13cba36f92b7aff346ac1a"
+version = "2.10.0"
 dependencies = [
  "gccjit_sys",
 ]
 
 [[package]]
 name = "gccjit_sys"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95ed7572b30cd32430294dde6fb70822d58e67c6846a548647e8739776a0125b"
+version = "0.9.0"
 dependencies = [
  "libc",
 ]
@@ -117,15 +113,13 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.168"
+version = "0.2.177"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5aaeb2981e0606ca11d79718f8bb01164f1d6ed75080182d3abf017e6d244b6d"
+checksum = "2874a2af47a2325c2001a6e6fad9b16a53b802102b528163885171cf92b15976"
 
 [[package]]
 name = "linux-raw-sys"
-version = "0.9.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd945864f07fe9f5371a27ad7b52a172b4b499999f1d97574c9fa68373937e12"
+version = "0.11.0"
 
 [[package]]
 name = "memchr"
@@ -194,9 +188,7 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "1.0.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c71e83d6afe7ff64890ec6b71d6a69bb8a610ab78ce364b3352876bb4c801266"
+version = "1.1.2"
 dependencies = [
  "bitflags",
  "errno",

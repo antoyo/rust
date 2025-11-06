@@ -24,11 +24,12 @@ default = ["master"]
 [dependencies]
 object = { version = "0.37.0", default-features = false, features = ["std", "read"] }
 tempfile = "3.20"
-gccjit = "2.8"
+#gccjit = "2.8"
 #gccjit = { git = "https://github.com/rust-lang/gccjit.rs" }
 
 # Local copy.
 #gccjit = { path = "../gccjit.rs" }
+gccjit = { path = "/home/bouanto/Ordinateur/Programmation/Rust/Projets/gccjit.rs" }
 
 [dev-dependencies]
 boml = "0.3.1"
@@ -54,3 +55,7 @@ debug = false
 
 [package.metadata.rust-analyzer]
 rustc_private = true
+
+[patch.crates-io]
+linux-raw-sys = { path = "/home/bouanto/Telechargements/Source/linux-raw-sys" }
+rustix = { path = "/home/bouanto/Telechargements/Source/rustix" }

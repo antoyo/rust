@@ -93,3 +93,7 @@ codegen-units = 1
 # For git dependencies, also add your source to ALLOWED_SOURCES in src/tools/tidy/src/extdeps.rs.
 #[patch.crates-io]
 
+[patch.crates-io]
+#linux-raw-sys = { git = "https://github.com/antoyo/linux-raw-sys", branch = "m68k-support" }
+linux-raw-sys = { path = "/home/bouanto/Telechargements/Source/linux-raw-sys" }
+rustix = { path = "/home/bouanto/Telechargements/Source/rustix" }
