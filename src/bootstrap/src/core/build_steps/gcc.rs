@@ -51,8 +51,40 @@ impl GccOutput {
             format!("Cannot find libgccjit at {}", self.libgccjit.display())
         );
 
-        let dst = directory.join(target_filename);
+        let dst = directory.join(&target_filename);
         builder.copy_link(&actual_libgccjit_path, &dst, FileType::NativeLibrary);
+        eprintln!("Copy link: {:?} -> {:?}", actual_libgccjit_path, dst);
+
+        // TODO: or copy the libs HERE?
+        if let Some(ref path) = builder.config.libgccjit_libs_dir {
+            let host_target = builder.config.host_target.triple;
+
+            let source = path.join(host_target);
+            let dst = directory;
+            eprintln!(" **** Target: {:?}", builder.config.targets);
+
+            let targets = builder.config.targets.iter()
+                .map(|target| target.triple)
+                .chain(std::iter::once(host_target));
+
+            for target in targets {
+                let source = source.join(target).join(&target_filename);
+                // To support symlinks in libgccjit-libs-dir, we have to resolve it first,
+                // otherwise we'd create a symlink to a symlink, which wouldn't work.
+                let actual_libgccjit_path = t!(
+                    source.canonicalize(),
+                    format!("Cannot find libgccjit at {}", self.libgccjit.display())
+                );
+                println!(" == {:?} => {:?}", source, actual_libgccjit_path);
+                let target_dir = dst.join(target);
+                // TODO: Properly handle this error.
+                std::fs::create_dir_all(&target_dir).expect("create target dir for libgccjit");
+                let dst = target_dir.join(&target_filename);
+                builder.copy_link(&actual_libgccjit_path, &dst, FileType::NativeLibrary);
+                eprintln!(" **** Copy {:?} -> {:?}", actual_libgccjit_path, dst);
+            }
+        }
+
     }
 }
 
