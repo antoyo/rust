@@ -69,8 +69,10 @@ mod type_;
 mod type_of;
 
 use std::any::Any;
+use std::ffi::CString;
 use std::fmt::Debug;
 use std::ops::Deref;
+use std::path::Path;
 use std::path::PathBuf;
 #[cfg(not(feature = "master"))]
 use std::sync::atomic::AtomicBool;
@@ -145,7 +147,7 @@ impl TargetInfo {
 
 #[derive(Clone)]
 pub struct LockedTargetInfo {
-    info: Arc<Mutex<IntoDynSyncSend<TargetInfo>>>,
+    info: Arc<Mutex<IntoDynSyncSend<Option<TargetInfo>>>>,
 }
 
 impl Debug for LockedTargetInfo {
@@ -156,17 +158,38 @@ impl Debug for LockedTargetInfo {
 
 impl LockedTargetInfo {
     fn cpu_supports(&self, feature: &str) -> bool {
-        self.info.lock().expect("lock").cpu_supports(feature)
+        self.info.lock()
+            .expect("lock")
+            .as_ref()
+            .expect("target info not initialized")
+            .cpu_supports(feature)
     }
 
     fn supports_target_dependent_type(&self, typ: CType) -> bool {
-        self.info.lock().expect("lock").supports_target_dependent_type(typ)
+        self.info.lock()
+            .expect("lock")
+            .as_ref()
+            .expect("target info not initialized")
+            .supports_target_dependent_type(typ)
     }
 }
 
 #[derive(Clone)]
 pub struct GccCodegenBackend {
     target_info: LockedTargetInfo,
+}
+
+fn load_libgccjit(sysroot_path: &Path, target_triple: &str) {
+    //eprintln!("Target: {:?}", target_triple);
+
+    let sysroot_lib_dir = sysroot_path.join("lib");
+    let libgccjit_target_lib_file = sysroot_lib_dir.join(target_triple).join("libgccjit.so.0");
+    //eprintln!("Loading: {:?}", libgccjit_target_lib_file);
+
+    let path = libgccjit_target_lib_file.to_str().expect("libgccjit path");
+    let string = CString::new(path)
+        .expect("string to libgccjit path");
+    gccjit::load(&string);
 }
 
 impl CodegenBackend for GccCodegenBackend {
@@ -178,10 +201,12 @@ impl CodegenBackend for GccCodegenBackend {
         "gcc"
     }
 
-    fn init(&self, _sess: &Session) {
+    fn init(&self, sess: &Session) {
+        load_libgccjit(sess.opts.sysroot.path(), &sess.target.llvm_target);
+
         #[cfg(feature = "master")]
         {
-            let target_cpu = target_cpu(_sess);
+            let target_cpu = target_cpu(sess);
 
             // Get the second TargetInfo with the correct CPU features by setting the arch.
             let context = Context::default();
@@ -189,7 +214,9 @@ impl CodegenBackend for GccCodegenBackend {
                 context.add_command_line_option(format!("-march={}", target_cpu));
             }
 
-            **self.target_info.info.lock().expect("lock") = context.get_target_info();
+            *self.target_info.info
+                .lock()
+                .expect("lock") = IntoDynSyncSend(Some(context.get_target_info()));
         }
 
         #[cfg(feature = "master")]
@@ -378,11 +405,12 @@ impl WriteBackendMethods for GccCodegenBackend {
     }
 
     fn optimize(
-        _cgcx: &CodegenContext<Self>,
+        cgcx: &CodegenContext<Self>,
         _dcx: DiagCtxtHandle<'_>,
         module: &mut ModuleCodegen<Self::Module>,
         config: &ModuleConfig,
     ) {
+        load_libgccjit(&cgcx.sysroot_path, &cgcx.target_triple);
         module.module_llvm.context.set_optimization_level(to_gcc_opt_level(config.opt_level));
     }
 
@@ -413,17 +441,19 @@ impl WriteBackendMethods for GccCodegenBackend {
 /// This is the entrypoint for a hot plugged rustc_codegen_gccjit
 #[unsafe(no_mangle)]
 pub fn __rustc_codegen_backend() -> Box<dyn CodegenBackend> {
+    // TODO: make sure the initialization of this done elsewhere works properly.
     #[cfg(feature = "master")]
     let info = {
         // Check whether the target supports 128-bit integers, and sized floating point types (like
         // Float16).
-        let context = Context::default();
-        Arc::new(Mutex::new(IntoDynSyncSend(context.get_target_info())))
+        /*let context = Context::default();
+        Arc::new(Mutex::new(IntoDynSyncSend(context.get_target_info())))*/
+        Arc::new(Mutex::new(IntoDynSyncSend(None)))
     };
     #[cfg(not(feature = "master"))]
-    let info = Arc::new(Mutex::new(IntoDynSyncSend(TargetInfo {
+    let info = Arc::new(Mutex::new(IntoDynSyncSend(Some(TargetInfo {
         supports_128bit_integers: AtomicBool::new(false),
-    })));
+    }))));
 
     Box::new(GccCodegenBackend { target_info: LockedTargetInfo { info } })
 }
