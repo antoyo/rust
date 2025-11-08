@@ -179,7 +179,12 @@ pub struct GccCodegenBackend {
     target_info: LockedTargetInfo,
 }
 
-fn load_libgccjit(sysroot_path: &Path, target_triple: &str) {
+fn load_libgccjit_if_needed(sysroot_path: &Path, target_triple: &str) {
+    if gccjit::is_loaded() {
+        // Do not load a libgccjit second time.
+        return;
+    }
+
     //eprintln!("Target: {:?}", target_triple);
 
     let sysroot_lib_dir = sysroot_path.join("lib");
@@ -189,7 +194,10 @@ fn load_libgccjit(sysroot_path: &Path, target_triple: &str) {
     let path = libgccjit_target_lib_file.to_str().expect("libgccjit path");
     let string = CString::new(path)
         .expect("string to libgccjit path");
-    gccjit::load(&string);
+
+    if !gccjit::load(&string) {
+        panic!("Cannot load libgccjit at: {}", path);
+    }
 }
 
 impl CodegenBackend for GccCodegenBackend {
@@ -202,7 +210,7 @@ impl CodegenBackend for GccCodegenBackend {
     }
 
     fn init(&self, sess: &Session) {
-        load_libgccjit(sess.opts.sysroot.path(), &sess.target.llvm_target);
+        load_libgccjit_if_needed(sess.opts.sysroot.path(), &sess.target.llvm_target);
 
         #[cfg(feature = "master")]
         {
@@ -410,7 +418,7 @@ impl WriteBackendMethods for GccCodegenBackend {
         module: &mut ModuleCodegen<Self::Module>,
         config: &ModuleConfig,
     ) {
-        load_libgccjit(&cgcx.sysroot_path, &cgcx.target_triple);
+        load_libgccjit_if_needed(&cgcx.sysroot_path, &cgcx.target_triple);
         module.module_llvm.context.set_optimization_level(to_gcc_opt_level(config.opt_level));
     }
 
@@ -418,6 +426,7 @@ impl WriteBackendMethods for GccCodegenBackend {
         cgcx: &CodegenContext<Self>,
         thin: ThinModule<Self>,
     ) -> ModuleCodegen<Self::Module> {
+        load_libgccjit_if_needed(&cgcx.sysroot_path, &cgcx.target_triple);
         back::lto::optimize_thin_module(thin, cgcx)
     }
 
@@ -426,6 +435,7 @@ impl WriteBackendMethods for GccCodegenBackend {
         module: ModuleCodegen<Self::Module>,
         config: &ModuleConfig,
     ) -> CompiledModule {
+        load_libgccjit_if_needed(&cgcx.sysroot_path, &cgcx.target_triple);
         back::write::codegen(cgcx, module, config)
     }
 
