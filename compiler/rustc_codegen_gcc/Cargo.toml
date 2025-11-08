@@ -24,7 +24,8 @@ default = ["master"]
 [dependencies]
 object = { version = "0.37.0", default-features = false, features = ["std", "read"] }
 tempfile = "3.20"
-gccjit = "2.8"
+#gccjit = "2.8"
+gccjit = { git = "https://github.com/rust-lang/gccjit.rs", branch = "feature/dlopen", features = ["master", "dlopen"] }
 #gccjit = { git = "https://github.com/rust-lang/gccjit.rs" }
 
 # Local copy.
@@ -54,3 +55,7 @@ debug = false
 
 [package.metadata.rust-analyzer]
 rustc_private = true
+
+[patch.crates-io]
+linux-raw-sys = { git = "https://github.com/antoyo/linux-raw-sys", branch = "m68k-support" }
+rustix = { git = "https://github.com/antoyo/rustix", branch = "m68k-support" }
