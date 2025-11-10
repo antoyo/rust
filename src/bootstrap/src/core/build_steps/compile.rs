@@ -1573,13 +1573,13 @@ impl Step for RustcLink {
 /// It includes the path to the libgccjit library on which this backend depends.
 #[derive(Clone)]
 pub struct GccCodegenBackendOutput {
-    stamp: BuildStamp,
+    pub stamp: BuildStamp,
     gcc: GccOutput,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GccCodegenBackend {
-    compilers: RustcPrivateCompilers,
+    pub compilers: RustcPrivateCompilers,
 }
 
 impl Step for GccCodegenBackend {

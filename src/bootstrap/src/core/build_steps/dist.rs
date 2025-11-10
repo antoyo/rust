@@ -1583,6 +1583,92 @@ impl Step for CraneliftCodegenBackend {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct GccCodegenBackend {
+    pub compilers: RustcPrivateCompilers,
+    pub target: TargetSelection,
+}
+
+impl Step for GccCodegenBackend {
+    type Output = Option<GeneratedTarball>;
+    const DEFAULT: bool = true;
+    const IS_HOST: bool = true;
+
+    fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
+        // We only want to build the gcc backend in `x dist` if the backend was enabled
+        // in rust.codegen-backends.
+        // Sadly, we don't have access to the actual target for which we're disting clif here..
+        // So we just use the host target.
+        let clif_enabled_by_default = run
+            .builder
+            .config
+            .enabled_codegen_backends(run.builder.host_target)
+            .contains(&CodegenBackendKind::Gcc);
+        run.alias("rustc_codegen_gcc").default_condition(clif_enabled_by_default)
+    }
+
+    fn make_run(run: RunConfig<'_>) {
+        run.builder.ensure(GccCodegenBackend {
+            compilers: RustcPrivateCompilers::new(run.builder, run.builder.top_stage, run.target),
+            target: run.target,
+        });
+    }
+
+    fn run(self, builder: &Builder<'_>) -> Option<GeneratedTarball> {
+        // This prevents rustc_codegen_gcc from being built for "dist"
+        // or "install" on the stable/beta channels. It is not yet stable and
+        // should not be included.
+        if !builder.build.unstable_features() {
+            return None;
+        }
+
+        let target = self.target;
+        /*if !target_supports_gcc_backend(target) {
+            builder.info("target not supported by rustc_codegen_gcc. skipping");
+            return None;
+        }*/
+
+        let mut tarball = Tarball::new(builder, "rustc-codegen-gcc", &target.triple);
+        //tarball.set_overlay(OverlayKind::RustcCodegenGcc);
+        tarball.is_preview(true);
+        tarball.add_legal_and_readme_to("share/doc/rustc_codegen_gcc");
+
+        let compilers = self.compilers;
+        let gcc_output = builder.ensure(compile::GccCodegenBackend { compilers });
+
+        if builder.config.dry_run() {
+            return None;
+        }
+
+        // Get the relative path of where the codegen backend should be stored.
+        let backends_dst = builder.sysroot_codegen_backends(compilers.target_compiler());
+        let backends_rel = backends_dst
+            .strip_prefix(builder.sysroot(compilers.target_compiler()))
+            .unwrap()
+            .strip_prefix(builder.sysroot_libdir_relative(compilers.target_compiler()))
+            .unwrap();
+        // Don't use custom libdir here because ^lib/ will be resolved again with installer
+        let backends_dst = PathBuf::from("lib").join(backends_rel);
+
+        let codegen_backend_dylib = get_codegen_backend_file(&gcc_output.stamp);
+        tarball.add_renamed_file(
+            &codegen_backend_dylib,
+            &backends_dst,
+            &normalize_codegen_backend_name(builder, &codegen_backend_dylib),
+            FileType::NativeLibrary,
+        );
+
+        Some(tarball.generate())
+    }
+
+    fn metadata(&self) -> Option<StepMetadata> {
+        Some(
+            StepMetadata::dist("rustc_codegen_gcc", self.target)
+                .built_by(self.compilers.build_compiler()),
+        )
+    }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct Rustfmt {
     pub compilers: RustcPrivateCompilers,
     pub target: TargetSelection,
@@ -1692,6 +1778,10 @@ impl Step for Extended {
         add_component!("miri" => Miri { compilers: rustc_private_compilers, target });
         add_component!("analysis" => Analysis { build_compiler, target });
         add_component!("rustc-codegen-cranelift" => CraneliftCodegenBackend {
+            compilers: rustc_private_compilers,
+            target
+        });
+        add_component!("rustc-codegen-gcc" => GccCodegenBackend {
             compilers: rustc_private_compilers,
             target
         });
