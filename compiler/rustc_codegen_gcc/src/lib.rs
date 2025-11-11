@@ -413,12 +413,11 @@ impl WriteBackendMethods for GccCodegenBackend {
     }
 
     fn optimize(
-        cgcx: &CodegenContext<Self>,
+        _cgcx: &CodegenContext<Self>,
         _dcx: DiagCtxtHandle<'_>,
         module: &mut ModuleCodegen<Self::Module>,
         config: &ModuleConfig,
     ) {
-        load_libgccjit_if_needed(&cgcx.sysroot_path, &cgcx.target_triple);
         module.module_llvm.context.set_optimization_level(to_gcc_opt_level(config.opt_level));
     }
 
@@ -426,7 +425,6 @@ impl WriteBackendMethods for GccCodegenBackend {
         cgcx: &CodegenContext<Self>,
         thin: ThinModule<Self>,
     ) -> ModuleCodegen<Self::Module> {
-        load_libgccjit_if_needed(&cgcx.sysroot_path, &cgcx.target_triple);
         back::lto::optimize_thin_module(thin, cgcx)
     }
 
@@ -435,7 +433,6 @@ impl WriteBackendMethods for GccCodegenBackend {
         module: ModuleCodegen<Self::Module>,
         config: &ModuleConfig,
     ) -> CompiledModule {
-        load_libgccjit_if_needed(&cgcx.sysroot_path, &cgcx.target_triple);
         back::write::codegen(cgcx, module, config)
     }
 

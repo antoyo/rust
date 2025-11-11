@@ -57,7 +57,7 @@ dependencies = [
 [[package]]
 name = "gccjit"
 version = "2.10.0"
-source = "git+https://github.com/rust-lang/gccjit.rs?branch=feature%2Fdlopen#eb19cd8500792d59ba1de48426be84a5f97d606c"
+source = "git+https://github.com/rust-lang/gccjit.rs?branch=feature%2Fdlopen#098c1afadeca7224da1267d94a76f743f654dce2"
 dependencies = [
  "gccjit_sys",
 ]
@@ -65,7 +65,7 @@ dependencies = [
 [[package]]
 name = "gccjit_sys"
 version = "0.9.0"
-source = "git+https://github.com/rust-lang/gccjit.rs?branch=feature%2Fdlopen#eb19cd8500792d59ba1de48426be84a5f97d606c"
+source = "git+https://github.com/rust-lang/gccjit.rs?branch=feature%2Fdlopen#098c1afadeca7224da1267d94a76f743f654dce2"
 dependencies = [
  "libc",
 ]

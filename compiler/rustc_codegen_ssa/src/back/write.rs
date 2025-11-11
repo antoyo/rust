@@ -360,9 +360,6 @@ pub struct CodegenContext<B: WriteBackendMethods> {
     ///
     /// Depends on [`ExtraBackendMethods::supports_parallel()`] and `-Zno_parallel_backend`.
     pub parallel: bool,
-
-    pub sysroot_path: PathBuf,
-    pub target_triple: String,
 }
 
 impl<B: WriteBackendMethods> CodegenContext<B> {
@@ -1317,8 +1314,6 @@ fn start_executing_work<B: ExtraBackendMethods>(
         parallel: backend.supports_parallel() && !sess.opts.unstable_opts.no_parallel_backend,
         pointer_size: tcx.data_layout.pointer_size(),
         invocation_temp: sess.invocation_temp.clone(),
-        sysroot_path: sess.opts.sysroot.path().to_path_buf(),
-        target_triple: sess.target.llvm_target.to_string(),
     };
 
     // This is the "main loop" of parallel work happening for parallel codegen.
