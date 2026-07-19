@@ -15,7 +15,7 @@ use rustc_middle::ty::print::with_no_trimmed_paths;
 use rustc_middle::ty::{self, CoroutineArgsExt, Ty, TypeVisitableExt};
 use rustc_target::callconv::{CastTarget, FnAbi};
 
-use crate::abi::{FnAbiGcc, FnAbiGccExt, GccType};
+use crate::abi::{FnAbiGccExt, GccType};
 use crate::context::CodegenCx;
 use crate::type_::struct_fields;
 
@@ -351,8 +351,10 @@ impl<'gcc, 'tcx> LayoutTypeCodegenMethods<'tcx> for CodegenCx<'gcc, 'tcx> {
     }
 
     fn fn_decl_backend_type(&self, fn_abi: &FnAbi<'tcx, Ty<'tcx>>) -> Type<'gcc> {
-        // FIXME(antoyo): Should we do something with `FnAbiGcc::fn_attributes`?
-        let FnAbiGcc { return_type, arguments_type, is_c_variadic, .. } = fn_abi.gcc_type(self);
-        self.context.new_function_pointer_type(None, return_type, &arguments_type, is_c_variadic)
+        // NOTE: this must build the same function pointer type as `fn_ptr_backend_type`,
+        // including the indirect-return flag: this type is what call sites cast the function
+        // pointer to, so a missing flag would make GCC classify the call as returning in
+        // registers while the callee returns in memory.
+        fn_abi.ptr_to_gcc_type(self)
     }
 }

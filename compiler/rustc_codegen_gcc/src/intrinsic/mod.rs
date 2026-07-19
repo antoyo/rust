@@ -828,11 +828,10 @@ impl<'gcc, 'tcx> ArgAbiExt<'gcc, 'tcx> for ArgAbi<'tcx, Ty<'tcx>> {
             let mut index = *idx;
             if bx.functions_with_indirect_param.borrow().contains_key(&func) {
                 if index == 0 {
-                    todo!();
-                    /*let return_type = func.get_return_type();
-                    let var = func.new_local(self.location, return_type, "indirectParam");
-                    *self.indirect_param_lvalue.borrow_mut() = Some(var);
-                    return var.get_address(None);*/
+                    if let Some(lvalue) = bx.functions_with_indirect_param.borrow()[&func] {
+                        *idx += 1;
+                        return lvalue.get_address(None);
+                    }
                 }
 
                 // Remove once since the indirect parameter is not a parameter in GCC: it is the return

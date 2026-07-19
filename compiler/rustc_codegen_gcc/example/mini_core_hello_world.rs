@@ -2,11 +2,10 @@
 
 #![feature(
     no_core, unboxed_closures, lang_items, never_type, linkage,
-    extern_types, thread_local
+    extern_types, thread_local, rustc_private
 )]
 #![no_core]
 #![allow(dead_code, internal_features, non_camel_case_types)]
-#![rustfmt_skip]
 
 extern crate mini_core;
 

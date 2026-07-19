@@ -147,18 +147,13 @@ impl<'gcc, 'tcx> FnAbiGccExt<'gcc, 'tcx> for FnAbi<'tcx, Ty<'tcx>> {
             PassMode::Direct(_) | PassMode::Pair(..) => self.ret.layout.immediate_gcc_type(cx),
             PassMode::Cast { ref cast, .. } => cast.gcc_type(cx),
             PassMode::Indirect { .. } => {
+                // The function is declared as returning the struct by value. Since the
+                // function is marked as having an indirect return (see `declare_fn` and
+                // `ptr_to_gcc_type`), GCC's own calling convention machinery performs the
+                // sret lowering (hidden pointer parameter, returned in the appropriate
+                // register), matching what cg_llvm expects.
                 has_indirect_param = true;
-                let typ = self.ret.layout.gcc_type(cx);
-                /*println!("Type: {:?}", typ);
-                if let Some(struct_type) = typ.is_struct() {
-                    for i in 0..struct_type.get_field_count() {
-                        println!("  * {:?}", struct_type.get_field(i as i32));
-                    }
-                }*/
-                //println!("Calling get addressable");
-                // typ.get_addressable()
-                typ.set_addressable();
-                typ
+                self.ret.layout.gcc_type(cx)
             }
         };
         #[cfg(feature = "master")]
@@ -254,8 +249,17 @@ impl<'gcc, 'tcx> FnAbiGccExt<'gcc, 'tcx> for FnAbi<'tcx, Ty<'tcx>> {
 
     fn ptr_to_gcc_type(&self, cx: &CodegenCx<'gcc, 'tcx>) -> Type<'gcc> {
         // FIXME(antoyo): Should we do something with `FnAbiGcc::fn_attributes`?
-        let FnAbiGcc { return_type, arguments_type, is_c_variadic, .. } = self.gcc_type(cx);
-        cx.context.new_function_pointer_type(None, return_type, &arguments_type, is_c_variadic)
+        let FnAbiGcc { return_type, arguments_type, is_c_variadic, has_indirect_param, .. } =
+            self.gcc_type(cx);
+        let pointer_type =
+            cx.context.new_function_pointer_type(None, return_type, &arguments_type, is_c_variadic);
+        if has_indirect_param {
+            // The pointed-to function returns its value in memory: flag the function type
+            // so that calls through this pointer use the same calling convention as direct
+            // calls to a function declared with an indirect return.
+            pointer_type.set_addressable();
+        }
+        pointer_type
     }
 
     #[cfg(feature = "master")]

@@ -126,40 +126,20 @@ impl<'gcc, 'tcx> CodegenCx<'gcc, 'tcx> {
         let func = declare_raw_fn(self, name, conv, return_type, &arguments_type, is_c_variadic);
         self.on_stack_function_params.borrow_mut().insert(func, on_stack_param_indices);
 
-        if name == "_ZN4core10intrinsics9cold_path17ha9169cdbb30c5ff5E" {
-            //dbg!(has_indirect_param);
-            //panic!();
-        }
-        if name == "_ZN4core10intrinsics16carrying_mul_add17h128dbbfd5cd0c894E" {
-            //dbg!(has_indirect_param);
-            //panic!();
-        }
         if has_indirect_param {
-            // Tried: using DECL_BY_REFERENCE instead of TREE_ADDRESSABLE.
-            // Tried: both for PARM_DECL (DOESN'T WORK) and RESULT_DECL (WORKS).
-            // TODO: try again with PARM_DECL since we needed a pointer?
-            // This will require using pointers directly in cg_gcc.
-            //func.set_indirect_return();
+            // Make GCC return the value in memory (through a hidden pointer), even if the
+            // target ABI would normally return it in registers, so that the calling
+            // convention matches what cg_llvm expects for `PassMode::Indirect` returns.
+            func.set_indirect_return();
 
-            let lvalue =
-                if self.linkage.get() != FunctionType::Extern {
-                    // NOTE: it is important to call unqualified since we would not want the type
-                    // of the variable to be addressable.
-                    // If the type of this variable would be addressable, we would get an assert
-                    // failure later down the line because of a temporary with an addressable type
-                    // which GCC doesn't like.
-                    //println!("Function return type: {:?}", func.get_return_type());
-                    let var_type = func.get_return_type().unqualified();
-                    //let var_type = func.get_return_type();
-                    assert!(!format!("{:?}", var_type).contains("addressable"));
-
-                    //println!("Variable type: {:?}", var_type);
-                    // FIXME: var_type has ADDRESSABLE here.
-                    Some(func.new_local(None, var_type, "indirectParam"))
-                }
-                else {
-                    None
-                };
+            let lvalue = if self.linkage.get() != FunctionType::Extern {
+                // Local buffer holding the return value: MIR writes the return value
+                // through its address (returned by `get_param(0)`) and `ret_void` returns
+                // it by value.
+                Some(func.new_local(None, func.get_return_type(), "indirectParam"))
+            } else {
+                None
+            };
 
             self.functions_with_indirect_param.borrow_mut().insert(func, lvalue);
         }
