@@ -18,7 +18,7 @@ use rustc_codegen_ssa::mir::operand::{OperandRef, OperandValue};
 use rustc_codegen_ssa::mir::place::PlaceRef;
 use rustc_codegen_ssa::traits::{
     BackendTypes, BaseTypeCodegenMethods, BuilderMethods, ConstCodegenMethods,
-    LayoutTypeCodegenMethods, OverflowOp, StaticBuilderMethods,
+    LayoutTypeCodegenMethods, OverflowOp, ReturnSlot, StaticBuilderMethods,
 };
 use rustc_data_structures::fx::FxHashSet;
 use rustc_middle::bug;
@@ -315,7 +315,7 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
     pub fn function_call(
         &mut self,
         func: Function<'gcc>,
-        indirect_return_pointer: Option<RValue<'gcc>>,
+        return_slot: ReturnSlot<RValue<'gcc>>,
         args: &[RValue<'gcc>],
         _funclet: Option<&Funclet>,
     ) -> RValue<'gcc> {
@@ -327,7 +327,7 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         let void_type = self.context.new_type::<()>();
         if return_type != void_type {
             let return_value = self.cx.context.new_call(self.location, func, &args);
-            self.assign_call_to_var(indirect_return_pointer, return_value)
+            self.assign_call_to_var(return_slot, return_value)
         } else {
             self.block
                 .add_eval(self.location, self.cx.context.new_call(self.location, func, &args));
@@ -341,7 +341,7 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         typ: Type<'gcc>,
         fn_abi: Option<&FnAbi<'tcx, Ty<'tcx>>>,
         mut func_ptr: RValue<'gcc>,
-        indirect_return_pointer: Option<RValue<'gcc>>,
+        return_slot: ReturnSlot<RValue<'gcc>>,
         args: &[RValue<'gcc>],
         _funclet: Option<&Funclet>,
     ) -> RValue<'gcc> {
@@ -383,7 +383,7 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
                 args_adjusted,
                 orig_args,
             );
-            self.assign_call_to_var(indirect_return_pointer, return_value)
+            self.assign_call_to_var(return_slot, return_value)
         } else {
             #[cfg(not(feature = "master"))]
             if gcc_func.get_param_count() == 0 {
@@ -594,7 +594,7 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         fn_attrs: Option<&CodegenFnAttrs>,
         fn_abi: Option<&FnAbi<'tcx, Ty<'tcx>>>,
         func: RValue<'gcc>,
-        indirect_return_pointer: Option<RValue<'gcc>>,
+        return_slot: ReturnSlot<RValue<'gcc>>,
         args: &[RValue<'gcc>],
         then: Block<'gcc>,
         catch: Block<'gcc>,
@@ -606,7 +606,7 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         let current_block = self.block;
         self.block = try_block;
         let call =
-            self.call(typ, fn_attrs, fn_abi, func, indirect_return_pointer, args, None, instance); // FIXME(antoyo): use funclet here?
+            self.call(typ, fn_attrs, fn_abi, func, return_slot, args, None, instance); // FIXME(antoyo): use funclet here?
         self.block = current_block;
 
         let return_value =
@@ -634,7 +634,7 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         fn_attrs: Option<&CodegenFnAttrs>,
         fn_abi: Option<&FnAbi<'tcx, Ty<'tcx>>>,
         func: RValue<'gcc>,
-        indirect_return_pointer: Option<RValue<'gcc>>,
+        return_slot: ReturnSlot<RValue<'gcc>>,
         args: &[RValue<'gcc>],
         then: Block<'gcc>,
         catch: Block<'gcc>,
@@ -642,7 +642,7 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         instance: Option<Instance<'tcx>>,
     ) -> RValue<'gcc> {
         let call_site =
-            self.call(typ, fn_attrs, fn_abi, func, indirect_return_pointer, args, None, instance);
+            self.call(typ, fn_attrs, fn_abi, func, return_slot, args, None, instance);
         let condition = self.context.new_rvalue_from_int(self.bool_type, 1);
         self.llbb().end_with_conditional(self.location, condition, then, catch);
         if let Some(_fn_abi) = fn_abi {
@@ -1767,7 +1767,7 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         _fn_attrs: Option<&CodegenFnAttrs>,
         fn_abi: Option<&FnAbi<'tcx, Ty<'tcx>>>,
         func: RValue<'gcc>,
-        indirect_return_pointer: Option<RValue<'gcc>>,
+        return_slot: ReturnSlot<RValue<'gcc>>,
         args: &[RValue<'gcc>],
         funclet: Option<&Funclet>,
         _instance: Option<Instance<'tcx>>,
@@ -1777,10 +1777,10 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         let call = if self.functions.borrow().values().any(|value| *value == gcc_func) {
             // FIXME(antoyo): remove when the API supports a different type for functions.
             let func: Function<'gcc> = self.cx.rvalue_as_function(func);
-            self.function_call(func, indirect_return_pointer, &args, funclet)
+            self.function_call(func, return_slot, &args, funclet)
         } else {
             // If it's a not function that was defined, it's a function pointer.
-            self.function_ptr_call(typ, fn_abi, func, indirect_return_pointer, &args, funclet)
+            self.function_ptr_call(typ, fn_abi, func, return_slot, &args, funclet)
         };
         if let Some(_fn_abi) = fn_abi {
             // FIXME(bjorn3): Apply function attributes
@@ -2393,9 +2393,13 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         var.to_rvalue()
     }
 
-    fn assign_call_to_var(&self, indirect_return_pointer: Option<RValue<'gcc>>, call: RValue<'gcc>) -> RValue<'gcc> {
-        match indirect_return_pointer {
-            None => {
+    fn assign_call_to_var(
+        &self,
+        return_slot: ReturnSlot<RValue<'gcc>>,
+        call: RValue<'gcc>,
+    ) -> RValue<'gcc> {
+        match return_slot {
+            ReturnSlot::Direct => {
                 let return_type = call.get_type();
                 let result = self.current_func().new_local(
                     self.location,
@@ -2405,8 +2409,8 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
                 self.block.add_assignment(self.location, result, call);
                 result.to_rvalue()
             }
-            Some(sret_ptr) => {
-                // The indirect return pointer given by cg_ssa is an opaque byte pointer
+            ReturnSlot::Indirect(sret_ptr) => {
+                // The return slot given by cg_ssa is an opaque byte pointer
                 // (dereferencing it would give a single byte), so cast it to a pointer to the
                 // exact return type of the call. This way, the assignment below is between two
                 // values of the exact same type and GCC can store the call result directly into

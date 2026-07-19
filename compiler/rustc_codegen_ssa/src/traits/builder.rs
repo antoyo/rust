@@ -34,6 +34,38 @@ pub enum OverflowOp {
     Mul,
 }
 
+/// Where the return value of a call ends up.
+///
+/// This must be [`ReturnSlot::Indirect`] if and only if the callee's `FnAbi` has a
+/// `PassMode::Indirect` return (an "sret" return). The correspondence is checked in
+/// `do_call`; [`FunctionCx::make_return_dest`] is the only place that should produce
+/// the [`ReturnSlot::Indirect`] variant, call sites merely thread it through.
+///
+/// How the slot is passed to the callee is a backend decision: for instance, the LLVM
+/// backend passes it as the first argument (with the `sret` attribute), while the GCC
+/// backend uses it as the destination of an assignment of the call and lets GCC's own
+/// calling-convention machinery produce the hidden pointer.
+///
+/// [`FunctionCx::make_return_dest`]: crate::mir::FunctionCx
+#[derive(Copy, Clone, Debug)]
+pub enum ReturnSlot<V> {
+    /// The call produces its return value directly (in registers or not at all). This
+    /// is the case for every `PassMode` except `PassMode::Indirect`.
+    Direct,
+    /// The call returns through a caller-provided slot. The value is a pointer to a
+    /// fresh allocation of the callee's return layout (correctly aligned, and not
+    /// aliasing anything the callee can observe). The backend must guarantee that the
+    /// return value is stored into the slot when the call returns normally; the
+    /// contents of the slot are unspecified if the call unwinds.
+    Indirect(V),
+}
+
+impl<V> ReturnSlot<V> {
+    pub fn is_indirect(&self) -> bool {
+        matches!(self, ReturnSlot::Indirect(_))
+    }
+}
+
 pub trait BuilderMethods<'a, 'tcx>:
     Sized
     + LayoutOf<'tcx, LayoutOfResult = TyAndLayout<'tcx>>
@@ -129,13 +161,15 @@ pub trait BuilderMethods<'a, 'tcx>:
         self.switch(v, else_llbb, cases.map(|(val, bb, _)| (val, bb)))
     }
 
+    /// Like [`Self::call`], but with unwind edges. The `return_slot` follows the same
+    /// contract as documented on [`Self::call`].
     fn invoke(
         &mut self,
         llty: Self::FunctionSignature,
         fn_attrs: Option<&CodegenFnAttrs>,
         fn_abi: Option<&FnAbi<'tcx, Ty<'tcx>>>,
         llfn: Self::Value,
-        indirect_return_pointer: Option<Self::Value>,
+        return_slot: ReturnSlot<Self::Value>,
         args: &[Self::Value],
         then: Self::BasicBlock,
         catch: Self::BasicBlock,
@@ -641,22 +675,34 @@ pub trait BuilderMethods<'a, 'tcx>:
     /// The typical case that they are None is during the codegen of intrinsics and lang-items,
     /// as those are "fake functions" with only a trivial ABI if any, et cetera.
     ///
+    /// ## Return slot
+    ///
+    /// `return_slot` must be [`ReturnSlot::Indirect`] if and only if the callee returns via
+    /// `PassMode::Indirect`; see the documentation of [`ReturnSlot`] for the guarantees the
+    /// caller makes about the pointed-to slot and the obligations of the backend. The slot is
+    /// *not* part of `args`: whether the hidden return pointer is materialized as an argument
+    /// is up to the backend.
+    ///
     /// ## Return
     ///
-    /// Must return the value the function will return so it can be written to the destination,
-    /// assuming the function does not explicitly pass the destination as a pointer in `args`.
+    /// Must return the value the function will return so it can be written to the destination.
+    /// For calls with an indirect return, the returned value is meaningless and must not be
+    /// used: the return value lives in the slot.
     fn call(
         &mut self,
         llty: Self::FunctionSignature,
         caller_attrs: Option<&CodegenFnAttrs>,
         fn_abi: Option<&FnAbi<'tcx, Ty<'tcx>>>,
         fn_val: Self::Value,
-        indirect_return_pointer: Option<Self::Value>,
+        return_slot: ReturnSlot<Self::Value>,
         args: &[Self::Value],
         funclet: Option<&Self::Funclet>,
         callee_instance: Option<Instance<'tcx>>,
     ) -> Self::Value;
 
+    /// Note that there is no `return_slot` parameter: a tail call never stores into a local
+    /// destination. A tail callee with a `PassMode::Indirect` return must receive the
+    /// caller's own incoming return slot, which is a backend concern.
     fn tail_call(
         &mut self,
         llty: Self::FunctionSignature,
