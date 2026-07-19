@@ -182,9 +182,10 @@ fn adjust_feature<'a>(arch: &str, feature: &'a str) -> &'a str {
                 // TODO: can we generalize this to remove the + prefix if there's one and add a +
                 // if there's none?
                 "crc" => "+crc",
-                _ => return feature,
+                _ => feature,
             }
         }
+        "x86_64" => feature,
         _ => panic!("{arch}"),
     }
 }
