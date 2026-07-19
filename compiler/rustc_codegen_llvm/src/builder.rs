@@ -1539,19 +1539,20 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         caller_attrs: Option<&CodegenFnAttrs>,
         fn_abi: &FnAbi<'tcx, Ty<'tcx>>,
         llfn: Self::Value,
+        return_slot: ReturnSlot<Self::Value>,
         args: &[Self::Value],
         funclet: Option<&Self::Funclet>,
         callee_instance: Option<Instance<'tcx>>,
     ) {
+        // For an indirect return, the slot is the caller's own incoming `sret`
+        // parameter, and `call` forwards it as the callee's `sret` argument: LLVM's
+        // `musttail` rules require the prototypes to match, including `sret`.
         let call = self.call(
             llty,
             caller_attrs,
             Some(fn_abi),
             llfn,
-            // Tail calls don't support indirect returns at the time of writing: a tail
-            // callee with an indirect return must receive the caller's own incoming
-            // return slot, not a local destination.
-            ReturnSlot::Direct,
+            return_slot,
             args,
             funclet,
             callee_instance,
@@ -1559,6 +1560,9 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         llvm::LLVMSetTailCallKind(call, llvm::TailCallKind::MustTail);
 
         match &fn_abi.ret.mode {
+            // An `sret` function returns void at the LLVM level, so `ret void` is
+            // correct for `PassMode::Indirect` too: the value lives in the forwarded
+            // slot.
             PassMode::Ignore | PassMode::Indirect { .. } => self.ret_void(),
             PassMode::Direct(_) | PassMode::Pair { .. } | PassMode::Cast { .. } => self.ret(call),
         }

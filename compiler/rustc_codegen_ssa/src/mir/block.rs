@@ -240,11 +240,6 @@ impl<'a, 'tcx> TerminatorCodegenHelper<'tcx> {
             }
         };
 
-        if kind == CallKind::Tail {
-            bx.tail_call(fn_ty, caller_attrs, fn_abi, fn_ptr, llargs, self.funclet(fx), instance);
-            return MergingSucc::False;
-        }
-
         // This is the single point where the return slot is consumed: catch call paths
         // that forgot to provide one (or provided a spurious one) here, in every
         // backend, instead of miscompiling.
@@ -253,6 +248,20 @@ impl<'a, 'tcx> TerminatorCodegenHelper<'tcx> {
             fn_abi.ret.is_indirect(),
             "a return slot must be provided if and only if the return is `PassMode::Indirect`",
         );
+
+        if kind == CallKind::Tail {
+            bx.tail_call(
+                fn_ty,
+                caller_attrs,
+                fn_abi,
+                fn_ptr,
+                return_slot,
+                llargs,
+                self.funclet(fx),
+                instance,
+            );
+            return MergingSucc::False;
+        }
 
         if let Some(unwind_block) = unwind_block {
             let ret_llbb = if let Some((_, target)) = destination {
@@ -1220,15 +1229,19 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 (target.map(|target| (return_dest, target)), return_slot)
             }
             CallKind::Tail => {
-                if fn_abi.ret.is_indirect() {
+                let return_slot = if fn_abi.ret.is_indirect() {
                     match self.make_return_dest(bx, destination, &fn_abi.ret) {
-                        (ReturnDest::Nothing, _) => {}
+                        // The destination of `become` is the return place, so the slot is
+                        // the caller's own incoming return slot, which the callee reuses.
+                        (ReturnDest::Nothing, return_slot) => return_slot,
                         _ => bug!(
                             "tail calls to functions with indirect returns cannot store into a destination"
                         ),
                     }
-                }
-                (None, ReturnSlot::Direct)
+                } else {
+                    ReturnSlot::Direct
+                };
+                (None, return_slot)
             }
         };
 

@@ -700,15 +700,19 @@ pub trait BuilderMethods<'a, 'tcx>:
         callee_instance: Option<Instance<'tcx>>,
     ) -> Self::Value;
 
-    /// Note that there is no `return_slot` parameter: a tail call never stores into a local
-    /// destination. A tail callee with a `PassMode::Indirect` return must receive the
-    /// caller's own incoming return slot, which is a backend concern.
+    /// For a tail call, [`ReturnSlot::Indirect`] carries the caller's *own incoming*
+    /// return slot: `become` requires matching signatures, its destination is the return
+    /// place, and for an indirect return the return place is backed by the incoming
+    /// slot. The backend must arrange for the callee to reuse that slot — for instance,
+    /// the LLVM backend forwards it as the callee's `sret` argument, as LLVM's
+    /// `musttail` rules require (matching prototypes, including `sret`).
     fn tail_call(
         &mut self,
         llty: Self::FunctionSignature,
         caller_attrs: Option<&CodegenFnAttrs>,
         fn_abi: &FnAbi<'tcx, Ty<'tcx>>,
         llfn: Self::Value,
+        return_slot: ReturnSlot<Self::Value>,
         args: &[Self::Value],
         funclet: Option<&Self::Funclet>,
         callee_instance: Option<Instance<'tcx>>,

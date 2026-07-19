@@ -1794,6 +1794,7 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         _fn_attrs: Option<&CodegenFnAttrs>,
         _fn_abi: &FnAbi<'tcx, Ty<'tcx>>,
         _llfn: Self::Value,
+        _return_slot: ReturnSlot<Self::Value>,
         _args: &[Self::Value],
         _funclet: Option<&Self::Funclet>,
         _instance: Option<Instance<'tcx>>,
