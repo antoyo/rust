@@ -902,7 +902,16 @@ impl<'a> Linker for GccLinker<'a> {
     fn linker_plugin_lto(&mut self) {
         match self.sess.opts.cg.linker_plugin_lto {
             LinkerPluginLto::Disabled => {
-                // Nothing to do
+                // When invoked through a C compiler wrapper (gcc/clang), the driver will
+                // perform LTO at link time if any of the object files it is handed contain
+                // LTO bytecode. This is the case for the fat LTO objects produced by the GCC
+                // codegen backend. Since linker plugin LTO is disabled we don't want the
+                // driver to run LTO, so tell it not to. This is independent of the codegen
+                // backend: `-fno-lto` is a no-op for object files that don't carry LTO
+                // bytecode, so it is safe to pass in all cases.
+                if self.is_cc() {
+                    self.cc_arg("-fno-lto");
+                }
             }
             LinkerPluginLto::LinkerPluginAuto => {
                 self.push_linker_plugin_lto_args(None);
