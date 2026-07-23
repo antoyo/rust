@@ -37,7 +37,7 @@ use crate::abi::FnAbiGccExt;
 use crate::common::{SignType, TypeReflection, type_is_pointer};
 use crate::context::CodegenCx;
 use crate::errors;
-use crate::intrinsic::llvm;
+use crate::intrinsic::{atomics, llvm};
 use crate::type_of::LayoutGccExt;
 
 // FIXME(antoyo)
@@ -1007,6 +1007,9 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
     ) -> RValue<'gcc> {
         // FIXME(antoyo): use ty.
         // FIXME(antoyo): handle alignment.
+        if let Some(result) = atomics::atomic_load(self, _ty, ptr, order, size) {
+            return result;
+        }
         let atomic_load =
             self.context.get_builtin_function(format!("__atomic_load_{}", size.bytes()));
         let ordering = self.context.new_rvalue_from_int(self.i32_type, order.to_gcc());
@@ -1175,6 +1178,9 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         size: Size,
     ) {
         // FIXME(antoyo): handle alignment.
+        if atomics::atomic_store(self, value, ptr, order, size) {
+            return;
+        }
         let atomic_store =
             self.context.get_builtin_function(format!("__atomic_store_{}", size.bytes()));
         let ordering = self.context.new_rvalue_from_int(self.i32_type, order.to_gcc());
@@ -1673,6 +1679,12 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         failure_order: AtomicOrdering,
         weak: bool,
     ) -> (RValue<'gcc>, RValue<'gcc>) {
+        let size = Size::from_bytes(get_maybe_pointer_size(src));
+        if let Some(result) =
+            atomics::atomic_cmpxchg(self, dst, cmp, src, order, failure_order, weak, size)
+        {
+            return result;
+        }
         let expected = self.current_func().new_local(None, cmp.get_type(), "expected");
         self.llbb().add_assignment(None, expected, cmp);
         // NOTE: gcc doesn't support a failure memory model that is stronger than the success
@@ -1697,6 +1709,15 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         ret_ptr: bool,
     ) -> RValue<'gcc> {
         let size = get_maybe_pointer_size(src);
+        // 128-bit values are never pointers, so `ret_ptr` is never set for the
+        // inline-asm path.
+        if !ret_ptr {
+            if let Some(result) =
+                atomics::atomic_rmw(self, op, dst, src, order, Size::from_bytes(size))
+            {
+                return result;
+            }
+        }
         let name = match op {
             AtomicRmwBinOp::AtomicXchg => format!("__atomic_exchange_{}", size),
             AtomicRmwBinOp::AtomicAdd => format!("__atomic_fetch_add_{}", size),
@@ -2383,6 +2404,26 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
 
         let res = then_vals | else_vals;
         self.bitcast_if_needed(res, result_type)
+    }
+
+    /// Create a temporary variable.
+    ///
+    /// GCC will use more stack space with a local variable than with a temporary variable in debug mode,
+    /// so in order to avoid having the stack probe test fail in CI, we avoid creating local variables for temporaries.
+    pub fn new_temp(
+        &self,
+        function: Function<'gcc>,
+        location: Option<Location<'gcc>>,
+        typ: Type<'gcc>,
+    ) -> LValue<'gcc> {
+        #[cfg(feature = "master")]
+        {
+            function.new_temp(location, typ)
+        }
+        #[cfg(not(feature = "master"))]
+        {
+            function.new_local(location, typ, format!("temp{}", self.next_value_counter()))
+        }
     }
 
     // GCC doesn't like deeply nested expressions.
