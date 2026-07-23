@@ -182,13 +182,20 @@ fn sync_cmpxchg<'gcc>(
 ) -> (RValue<'gcc>, RValue<'gcc>) {
     let func =
         bx.context.get_builtin_function(format!("__sync_val_compare_and_swap_{}", ctx.size.bytes()));
-    let ptr = bx.context.new_cast(bx.location, ptr, ctx.int_type.make_pointer());
-    // Match the builtin's parameter types (mirrors the `__atomic_*` handling).
-    let old_param_type = func.get_param(1).to_rvalue().get_type();
-    let expected_arg = bx.context.new_bitcast(bx.location, expected, old_param_type);
-    let desired_arg = bx.context.new_bitcast(bx.location, desired, old_param_type);
-    let old = bx.context.new_call(bx.location, func, &[ptr, expected_arg, desired_arg]);
-    let old = bx.context.new_bitcast(bx.location, old, ctx.int_type);
+    // Match the builtin's own parameter types: arg 0 is `volatile void *`, args 1/2
+    // are the value type. (Mirrors the `__atomic_*` handling in `builder.rs`.)
+    let ptr_type = func.get_param(0).to_rvalue().get_type();
+    let value_type = func.get_param(1).to_rvalue().get_type();
+    let ptr = bx.context.new_cast(bx.location, ptr, ptr_type);
+    let expected_arg = bx.context.new_bitcast(bx.location, expected, value_type);
+    let desired_arg = bx.context.new_bitcast(bx.location, desired, value_type);
+    let call = bx.context.new_call(bx.location, func, &[ptr, expected_arg, desired_arg]);
+    // Bind the call to a variable: a gccjit rvalue is an expression, so using the
+    // call in more than one place (the returned old value *and* the success
+    // comparison) would execute the CAS more than once.
+    let old = bx.new_temp(bx.current_func(), bx.location, ctx.int_type);
+    bx.llbb().add_assignment(bx.location, old, bx.context.new_bitcast(bx.location, call, ctx.int_type));
+    let old = old.to_rvalue();
     let success = bx.context.new_comparison(bx.location, ComparisonOp::Equals, old, expected);
     (old, success)
 }
