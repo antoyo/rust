@@ -176,13 +176,14 @@ fn adjust_feature<'a>(arch: &str, feature: &'a str) -> &'a str {
     match arch {
         "aarch64" => {
             match feature {
-                "+v8a" => "arch=armv8-a",
+                "v8a" => "arch=armv8-a",
                 // TODO: support other arm versions.
-                "+outline-atomics" => feature.strip_prefix('+').expect("+ at the start of feature"),
+                "outline-atomics" => feature,
+                //"+outline-atomics" => feature.strip_prefix('+').expect("+ at the start of feature"),
                 // TODO: can we generalize this to remove the + prefix if there's one and add a +
                 // if there's none?
                 "crc" => "+crc",
-                _ => feature,
+                _ => panic!("{feature}"),
             }
         }
         "x86_64" => feature,
