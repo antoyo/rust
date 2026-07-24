@@ -21,7 +21,7 @@ use rustc_target::spec::{Arch, RelocModel};
 
 use crate::builder::Builder;
 use crate::context::CodegenCx;
-use crate::{GccContext, LockedTargetInfo, LtoMode, SyncContext, gcc_util, new_context};
+use crate::{GccContext, LockedTargetInfo, LtoMode, SyncContext, add_baseline_flags, gcc_util, new_context};
 
 #[cfg(feature = "master")]
 pub fn visibility_to_gcc(visibility: Visibility) -> gccjit::Visibility {
@@ -166,6 +166,8 @@ pub fn compile_codegen_unit(
         if target_cpu != "generic" {
             context.add_command_line_option(format!("-march={}", target_cpu));
         }
+
+        add_baseline_flags(&context, &tcx.sess);
 
         if tcx
             .sess

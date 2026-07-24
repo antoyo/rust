@@ -240,6 +240,8 @@ impl CodegenBackend for GccCodegenBackend {
                 context.add_command_line_option(format!("-march={}", target_cpu));
             }
 
+            add_baseline_flags(&context, &sess);
+
             *self.target_info.info.lock().expect("lock") =
                 IntoDynSyncSend(Some(context.get_target_info()));
         }
@@ -312,6 +314,19 @@ impl CodegenBackend for GccCodegenBackend {
 
     fn fallback_intrinsics(&self) -> Vec<Symbol> {
         vec![sym::type_id_eq]
+    }
+}
+
+fn add_baseline_flags<'gcc>(context: &Context<'gcc>, sess: &Session) {
+    for feature in sess.target.features.split(',') {
+        let flag =
+            match feature {
+                "+v8a" => "-march=armv8-a",
+                "+outline-atomics" => "-moutline-atomics",
+                _ => panic!("{feature}"),
+            };
+        context.add_command_line_option(flag);
+        context.add_driver_option(flag);
     }
 }
 
@@ -535,7 +550,13 @@ fn target_config(sess: &Session, target_info: &LockedTargetInfo) -> TargetConfig
         sess,
         |feature| to_gcc_features(sess, feature),
         |feature| {
-            target_info.cpu_supports(feature)
+            let feature =
+                match (&sess.target.arch, feature) {
+                    (&Arch::AArch64, "neon") => "asimd",
+                    _ => feature,
+                };
+            let supports = target_info.cpu_supports(feature);
+            supports
             // cSpell:disable
             /*
               adx, aes, avx, avx2, avx512bf16, avx512bitalg, avx512bw, avx512cd, avx512dq, avx512er, avx512f, avx512fp16, avx512ifma,
