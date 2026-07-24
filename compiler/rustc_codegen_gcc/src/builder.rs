@@ -27,6 +27,8 @@ use rustc_middle::ty::layout::{
     FnAbiError, FnAbiOfHelpers, FnAbiRequest, HasTyCtxt, HasTypingEnv, LayoutError,
     LayoutOfHelpers, TyAndLayout,
 };
+#[cfg(feature = "master")]
+use rustc_middle::mir::BasicBlock;
 use rustc_middle::ty::{self, AtomicOrdering, Instance, Ty, TyCtxt};
 use rustc_span::Span;
 use rustc_span::def_id::DefId;
@@ -35,6 +37,8 @@ use rustc_target::spec::{HasTargetSpec, HasX86AbiOpt, Target, X86Abi};
 
 use crate::abi::FnAbiGccExt;
 use crate::common::{SignType, TypeReflection, type_is_pointer};
+#[cfg(feature = "master")]
+use crate::context::PendingCleanup;
 use crate::context::CodegenCx;
 use crate::errors;
 use crate::intrinsic::llvm;
@@ -46,6 +50,18 @@ type Funclet = ();
 enum ExtremumOperation {
     Max,
     Min,
+}
+
+/// Recover the MIR basic block a gccjit block corresponds to from its name.
+/// The SSA driver names MIR blocks `"bbN"` (via `format!("{bb:?}")`); auxiliary
+/// blocks cg_gcc creates (`"try"`, `"catch"`, `"cleanup"`, ...) do not match.
+#[cfg(feature = "master")]
+fn parse_mir_block_name(name: &str) -> Option<BasicBlock> {
+    let digits = name.strip_prefix("bb")?;
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    Some(BasicBlock::from_usize(digits.parse().ok()?))
 }
 
 pub struct Builder<'a, 'gcc, 'tcx> {
@@ -524,8 +540,20 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         self.block
     }
 
-    fn append_block(_: &'a CodegenCx<'gcc, 'tcx>, func: Function<'gcc>, name: &str) -> Block<'gcc> {
-        func.new_block(name)
+    fn append_block(cx: &'a CodegenCx<'gcc, 'tcx>, func: Function<'gcc>, name: &str) -> Block<'gcc> {
+        let block = func.new_block(name);
+        // Record the correspondence for MIR blocks (named `"bbN"` by the SSA
+        // driver), so cleanup regions can be reconstructed from MIR.
+        #[cfg(feature = "master")]
+        if let Some(bb) = parse_mir_block_name(name) {
+            let mut mir_blocks = cx.mir_blocks.borrow_mut();
+            let maps = mir_blocks.entry(func).or_default();
+            maps.bb_to_block.insert(bb, block);
+            maps.block_to_bb.insert(block, bb);
+        }
+        #[cfg(not(feature = "master"))]
+        let _ = cx;
+        block
     }
 
     fn append_sibling_block(&mut self, name: &str) -> Block<'gcc> {
@@ -557,6 +585,12 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
     }
 
     fn br(&mut self, dest: Block<'gcc>) {
+        // A cleanup landing pad's sole job is to jump to its cleanup's entry
+        // block; record that target so `invoke` can reconstruct the cleanup.
+        #[cfg(feature = "master")]
+        if self.cx.landing_pads.borrow().contains(&self.block) {
+            self.cx.landing_pad_targets.borrow_mut().entry(self.block).or_insert(dest);
+        }
         self.llbb().end_with_jump(self.location, dest)
     }
 
@@ -623,8 +657,21 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
 
         try_block.end_with_jump(self.location, then);
 
-        if self.cleanup_blocks.borrow().contains(&catch) {
-            self.block.add_try_finally(self.location, try_block, catch);
+        if self.cx.landing_pads.borrow().contains(&catch) {
+            // Unwind edge into a Drop cleanup. Emit a structured cleanup whose
+            // body resumes (GCC synthesizes a context-sensitive RESX). The try
+            // region is just this call; the cleanup region's blocks are filled
+            // in from MIR at finalization (see `populate_cleanup_regions`).
+            let enclosing_func = self.current_func();
+            let try_region = enclosing_func.new_region(self.location);
+            try_region.add_block(try_block);
+            let cleanup_region = enclosing_func.new_region(self.location);
+            self.block.add_cleanup(self.location, try_region, cleanup_region);
+            self.cx.pending_cleanups.borrow_mut().push(PendingCleanup {
+                func: enclosing_func,
+                region: cleanup_region,
+                landing_pad: catch,
+            });
         } else {
             self.block.add_try_catch(self.location, try_block, catch);
         }
@@ -1595,19 +1642,21 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
     fn cleanup_landing_pad(&mut self, pers_fn: Function<'gcc>) -> (RValue<'gcc>, RValue<'gcc>) {
         self.set_personality_fn(pers_fn);
 
-        // NOTE: insert the current block in a variable so that a later call to invoke knows to
-        // generate a try/finally instead of a try/catch for this block.
-        self.cleanup_blocks.borrow_mut().insert(self.block);
+        // Mark this block as a cleanup landing pad so `invoke` lowers the unwind
+        // edge reaching it to a structured cleanup (which resumes via RESX)
+        // rather than a try/catch.
+        self.cx.landing_pads.borrow_mut().insert(self.block);
 
-        let eh_pointer_builtin =
-            self.cx.context.get_target_builtin_function("__builtin_eh_pointer");
-        let zero = self.cx.context.new_rvalue_zero(self.int_type);
-        let ptr = self.cx.context.new_call(self.location, eh_pointer_builtin, &[zero]);
-
-        let value1_type = self.u8_type.make_pointer();
-        let ptr = self.cx.context.new_cast(self.location, ptr, value1_type);
-        let value1 = ptr;
-        let value2 = zero; // FIXME(antoyo): set the proper value here (the type of exception?).
+        // A cleanup resumes by falling through — it never inspects the exception
+        // object — so these landing-pad values are dead: the SSA driver stores
+        // them into the personality slot, but nothing reads them back now that
+        // `resume` falls through. Return well-defined null/zero rather than
+        // uninitialized locals. In particular we must NOT emit
+        // `__builtin_eh_pointer` here: retrieving the exception is only valid
+        // inside a catch region, and doing so in a cleanup made GCC's EH
+        // lowering ICE.
+        let value1 = self.context.new_null(self.u8_type.make_pointer());
+        let value2 = self.context.new_rvalue_zero(self.i32_type);
 
         (value1, value2)
     }
@@ -1624,18 +1673,12 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
     }
 
     fn filter_landing_pad(&mut self, pers_fn: Function<'gcc>) {
-        // FIXME(antoyo): generate the correct landing pad
-        self.cleanup_landing_pad(pers_fn);
+        self.set_personality_fn(pers_fn);
     }
 
     #[cfg(feature = "master")]
-    fn resume(&mut self, exn0: RValue<'gcc>, _exn1: RValue<'gcc>) {
-        let exn_type = exn0.get_type();
-        let exn = self.context.new_cast(self.location, exn0, exn_type);
-        let unwind_resume = self.context.get_target_builtin_function("__builtin_unwind_resume");
-        self.llbb()
-            .add_eval(self.location, self.context.new_call(self.location, unwind_resume, &[exn]));
-        self.unreachable();
+    fn resume(&mut self, _exn0: RValue<'gcc>, _exn1: RValue<'gcc>) {
+        self.block.end_with_fallthrough(self.location);
     }
 
     #[cfg(not(feature = "master"))]
