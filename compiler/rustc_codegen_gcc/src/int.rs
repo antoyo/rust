@@ -462,9 +462,19 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
                     lhs_high = self.context.new_cast(self.location, lhs_high, unsigned_type);
                     rhs_high = self.context.new_cast(self.location, rhs_high, unsigned_type);
                 }
-                // FIXME(antoyo): we probably need to handle signed comparison for unsigned
-                // integers.
-                _ => (),
+                // The comparison predicate carries the signedness, but GCC takes it from the
+                // operand types, so a signed comparison of an unsigned-typed value must cast
+                // the high part to its signed counterpart first (the low part is always
+                // compared as unsigned, since only the high part carries the sign).
+                IntPredicate::IntSGT
+                | IntPredicate::IntSGE
+                | IntPredicate::IntSLT
+                | IntPredicate::IntSLE => {
+                    let signed_type = native_int_type.to_signed(self.cx);
+                    lhs_high = self.context.new_cast(self.location, lhs_high, signed_type);
+                    rhs_high = self.context.new_cast(self.location, rhs_high, signed_type);
+                }
+                IntPredicate::IntEQ | IntPredicate::IntNE => (),
             }
 
             let condition = self.context.new_comparison(
@@ -602,9 +612,21 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
                         rhs = self.context.new_cast(self.location, rhs, unsigned_type);
                     }
                 }
-                // FIXME(antoyo): we probably need to handle signed comparison for unsigned
-                // integers.
-                _ => (),
+                // GCC derives the signedness of a comparison from the operand types rather
+                // than from the operator, so a signed comparison of unsigned-typed values
+                // (e.g. the niche-encoded enum tag tests emitted by `codegen_get_discr`)
+                // must cast both operands to the signed type first.
+                IntPredicate::IntSGT
+                | IntPredicate::IntSGE
+                | IntPredicate::IntSLT
+                | IntPredicate::IntSLE => {
+                    if !a_type.is_vector() {
+                        let signed_type = a_type.to_signed(self.cx);
+                        lhs = self.context.new_cast(self.location, lhs, signed_type);
+                        rhs = self.context.new_cast(self.location, rhs, signed_type);
+                    }
+                }
+                IntPredicate::IntEQ | IntPredicate::IntNE => (),
             }
             self.context.new_comparison(self.location, op.to_gcc_comparison(), lhs, rhs)
         }
