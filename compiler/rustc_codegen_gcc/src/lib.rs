@@ -318,6 +318,10 @@ impl CodegenBackend for GccCodegenBackend {
 }
 
 fn add_baseline_flags<'gcc>(context: &Context<'gcc>, sess: &Session) {
+    if sess.target.features.is_empty() {
+        return;
+    }
+
     for feature in sess.target.features.split(',') {
         let flag =
             match feature {
