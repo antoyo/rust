@@ -327,7 +327,7 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         let void_type = self.context.new_type::<()>();
         if return_type != void_type {
             let return_value = self.cx.context.new_call(self.location, func, &args);
-            self.assign_call_to_var(return_slot, return_value)
+            self.store_call_result(return_slot, return_value)
         } else {
             self.block
                 .add_eval(self.location, self.cx.context.new_call(self.location, func, &args));
@@ -355,6 +355,20 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
             }
         };
         let gcc_func = func_ptr_type.dyncast_function_ptr_type().expect("function ptr");
+        if let Some(fn_abi) = fn_abi {
+            // The correctness of indirect returns rests on every function pointer type
+            // built for this signature carrying the indirect-return flag: an unflagged
+            // type here would make GCC classify the call as returning in registers while
+            // the callee returns in memory, which miscompiles. Catch any code path that
+            // built the type without going through `ptr_to_gcc_type`.
+            assert_eq!(
+                func_ptr_type.is_indirect_return(),
+                fn_abi.ret.is_indirect(),
+                "the function pointer type must be flagged as having an indirect return \
+                 if and only if the return is `PassMode::Indirect`: {:?}",
+                func_ptr,
+            );
+        }
         let on_stack_param_indices = fn_abi
             .map(|fn_abi| fn_abi.gcc_type(self.cx).on_stack_param_indices)
             .unwrap_or_default();
@@ -383,7 +397,7 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
                 args_adjusted,
                 orig_args,
             );
-            self.assign_call_to_var(return_slot, return_value)
+            self.store_call_result(return_slot, return_value)
         } else {
             #[cfg(not(feature = "master"))]
             if gcc_func.get_param_count() == 0 {
@@ -2435,7 +2449,13 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         var.to_rvalue()
     }
 
-    fn assign_call_to_var(
+    /// Store the result of a call and return the value to hand back to cg_ssa: for an
+    /// indirect return, the result is stored into the caller-provided return slot (and
+    /// the returned value is a meaningless dummy); otherwise, it is stored into a fresh
+    /// local. The call must be anchored into a statement here in both cases: a gccjit
+    /// rvalue is an expression that is evaluated at each use, so returning the call
+    /// rvalue directly would duplicate or reorder the call.
+    fn store_call_result(
         &self,
         return_slot: ReturnSlot<RValue<'gcc>>,
         call: RValue<'gcc>,

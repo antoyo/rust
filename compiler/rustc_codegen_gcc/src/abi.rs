@@ -257,7 +257,7 @@ impl<'gcc, 'tcx> FnAbiGccExt<'gcc, 'tcx> for FnAbi<'tcx, Ty<'tcx>> {
             // The pointed-to function returns its value in memory: flag the function type
             // so that calls through this pointer use the same calling convention as direct
             // calls to a function declared with an indirect return.
-            pointer_type.set_addressable();
+            pointer_type.set_indirect_return();
         }
         pointer_type
     }
